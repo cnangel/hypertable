@@ -1,3 +1,21 @@
+# Copyright (C) 2007-2012 Hypertable, Inc.
+#
+# This file is part of Hypertable.
+#
+# Hypertable is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 3
+# of the License, or any later version.
+#
+# Hypertable is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with Hypertable. If not, see <http://www.gnu.org/licenses/>
+#
+
 # - Find Tcmalloc
 # Find the native Tcmalloc includes and library
 #
@@ -12,7 +30,7 @@ find_path(Tcmalloc_INCLUDE_DIR google/tcmalloc.h NO_DEFAULT_PATH PATHS
   /usr/local/include
 )
 
-if (USE_TCMALLOC)
+if (USE_TCMALLOC OR CMAKE_BUILD_TYPE STREQUAL "Debug")
   set(Tcmalloc_NAMES tcmalloc)
 else ()
   set(Tcmalloc_NAMES tcmalloc_minimal tcmalloc)
@@ -38,7 +56,7 @@ if (Tcmalloc_FOUND)
           ${HYPERTABLE_SOURCE_DIR}/cmake/CheckTcmalloc.cc
           CMAKE_FLAGS -DINCLUDE_DIRECTORIES=${Tcmalloc_INCLUDE_DIR}
                       -DLINK_LIBRARIES=${Tcmalloc_LIBRARIES}
-          OUTPUT_VARIABLE TC_TRY_OUT)
+          RUN_OUTPUT_VARIABLE TC_TRY_OUT)
   #message("tc_check build: ${TC_CHECK_BUILD}")
   #message("tc_check: ${TC_CHECK}")
   #message("tc_version: ${TC_TRY_OUT}")
@@ -52,7 +70,7 @@ if (Tcmalloc_FOUND)
   if (NOT TC_VERSION MATCHES "^[0-9]+.*")
     set(TC_VERSION "unknown -- make sure it's 1.1+")
   endif ()
-  message(STATUS "       version: ${TC_VERSION}")
+  message("       version: ${TC_VERSION}")
 else ()
   message(STATUS "Not Found Tcmalloc: ${Tcmalloc_LIBRARY}")
   if (Tcmalloc_FIND_REQUIRED)

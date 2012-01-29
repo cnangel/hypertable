@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -23,12 +23,13 @@
 #include <cassert>
 
 #include "Common/Checksum.h"
+#include "Common/Config.h"
 #include "Common/DynamicBuffer.h"
 #include "Common/Error.h"
 #include "Common/FileUtils.h"
 #include "Common/Logger.h"
 #include "Common/StringExt.h"
-#include "Common/Config.h"
+#include "Common/md5.h"
 
 #include "AsyncComm/Protocol.h"
 
@@ -56,9 +57,9 @@ namespace {
 }
 
 
-CommitLog::CommitLog(Filesystem *fs, const String &log_dir)
-  : CommitLogBase(log_dir) {
-  initialize(fs, log_dir, Config::properties, 0);
+CommitLog::CommitLog(FilesystemPtr &fs, const String &log_dir, bool is_meta)
+  : CommitLogBase(log_dir), m_fs(fs) {
+  initialize(log_dir, Config::properties, 0, is_meta);
 }
 
 CommitLog::~CommitLog() {
@@ -67,23 +68,26 @@ CommitLog::~CommitLog() {
 }
 
 void
-CommitLog::initialize(Filesystem *fs, const String &log_dir,
-                      PropertiesPtr &props, CommitLogBase *init_log) {
+CommitLog::initialize(const String &log_dir, PropertiesPtr &props,
+                      CommitLogBase *init_log, bool is_meta) {
   String compressor;
 
-  m_fs = fs;
   m_log_dir = log_dir;
   m_cur_fragment_length = 0;
   m_cur_fragment_num = 0;
   m_needs_roll = false;
+  m_replication = -1;
+
+  if (is_meta)
+    m_replication = props->get_i32("Hypertable.Metadata.Replication");
+  else
+    m_replication = props->get_i32("Hypertable.RangeServer.Data.DefaultReplication");
 
   SubProperties cfg(props, "Hypertable.CommitLog.");
 
   HT_TRY("getting commit log properites",
     m_max_fragment_size = cfg.get_i64("RollLimit");
     compressor = cfg.get_str("Compressor"));
-
-  m_replication = cfg.get_i32("Replication", (int32_t)-1);
 
   m_compressor = CompressorFactory::create_block_codec(compressor);
 
@@ -185,6 +189,11 @@ int CommitLog::link_log(CommitLogBase *log_base) {
   DynamicBuffer input;
   String &log_dir = log_base->get_log_dir();
 
+  if (m_linked_logs.count(md5_hash(log_dir.c_str())) > 0) {
+    HT_WARNF("Skipping log %s because it is already linked in", log_dir.c_str());
+    return Error::OK;
+  }
+
   if (m_needs_roll) {
     ScopedLock lock(m_mutex);
     if ((error = roll()) != Error::OK)
@@ -193,6 +202,8 @@ int CommitLog::link_log(CommitLogBase *log_base) {
 
   HT_INFOF("clgc Linking log %s into fragment %d; link_rev=%lld latest_rev=%lld",
            log_dir.c_str(), m_cur_fragment_num, (Lld)link_revision, (Lld)m_latest_revision);
+
+  HT_ASSERT(link_revision > 0);
 
   if (link_revision > m_latest_revision)
     m_latest_revision = link_revision;
@@ -223,6 +234,8 @@ int CommitLog::link_log(CommitLogBase *log_base) {
     return e.code();
   }
 
+  m_linked_logs.insert(md5_hash(log_dir.c_str()));
+
   return Error::OK;
 }
 
@@ -252,38 +265,48 @@ int CommitLog::purge(int64_t revision) {
   CommitLogFileInfo file_info;
   String fname;
 
-  HT_INFO_OUT << "Purging commit log fragments with latest revision older than " << revision
+  HT_DEBUG_OUT << "Purging commit log fragments with latest revision older than " << revision
               << HT_END;
-  try {
 
-    while (!m_fragment_queue.empty()) {
-      file_info = m_fragment_queue.front();
-      if (file_info.revision < revision) {
-        fname = file_info.log_dir + file_info.num;
+  while (!m_fragment_queue.empty()) {
+    file_info = m_fragment_queue.front();
+    if (file_info.revision < revision) {
+
+      fname = file_info.log_dir + file_info.num;
+
+      try {
         m_fs->remove(fname);
-        m_fragment_queue.pop_front();
-        HT_INFOF("clgc Removed log fragment file='%s' revision=%lld", fname.c_str(),
-                 (Lld)file_info.revision);
-        if (file_info.purge_log_dir) {
-          HT_INFOF("Removing commit log directory %s", file_info.log_dir.c_str());
+      }
+      catch (Exception &e) {
+        HT_ERRORF("Problem removing log fragment '%s' (%s - %s)",
+                  fname.c_str(), Error::get_text(e.code()), e.what());
+      }
+
+      m_fragment_queue.pop_front();
+
+      HT_DEBUGF("clgc Removed log fragment file='%s' revision=%lld", fname.c_str(),
+               (Lld)file_info.revision);
+
+      if (file_info.purge_log_dir) {
+        HT_INFOF("Removing commit log directory %s", file_info.log_dir.c_str());
+        try {
           m_fs->rmdir(file_info.log_dir);
         }
-      }
-      else {
-
-        HT_INFOF("clgc LOG FRAGMENT PURGE breaking because %lld >= %lld",
-                 (Lld)file_info.revision, (Lld)revision);
-
-        break;
+        catch (Exception &e) {
+          HT_ERRORF("Problem removing log directory '%s' (%s - %s)",
+                    file_info.log_dir.c_str(), Error::get_text(e.code()), e.what());
+        }
       }
     }
+    else {
 
+      HT_DEBUGF("clgc LOG FRAGMENT PURGE breaking because %lld >= %lld",
+               (Lld)file_info.revision, (Lld)revision);
+
+      break;
+    }
   }
-  catch (Hypertable::Exception &e) {
-    HT_ERROR_OUT << "Problem purging log fragment fname = " << fname.c_str() << "-" << e.what()
-                 << HT_END;
-    return e.code();
-  }
+
 
   return Error::OK;
 }
@@ -314,6 +337,7 @@ int CommitLog::roll() {
     file_info.log_dir = m_log_dir;
     file_info.num = m_cur_fragment_num;
     file_info.size = m_cur_fragment_length;
+    assert(m_latest_revision != TIMESTAMP_MIN);
     file_info.revision = m_latest_revision;
     file_info.purge_log_dir = false;
     file_info.block_stream = 0;

@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2007 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -45,6 +45,10 @@ namespace {
     "./hypertable_test.golden",
     "./hypertable_select_gz_test.golden",
     "./hypertable_test.tsv",
+    "./offset_test.hql",
+    "./offset_test.golden",
+    "./timeorder_test.hql",
+    "./timeorder_test.golden",
     0
   };
 }
@@ -57,7 +61,7 @@ int main(int argc, char **argv) {
   for (int i=0; required_files[i]; i++) {
     if (!FileUtils::exists(required_files[i])) {
       HT_ERRORF("Unable to find '%s'", required_files[i]);
-      return 1;
+      _exit(1);
     }
   }
 
@@ -67,19 +71,43 @@ int main(int argc, char **argv) {
   cmd_str = "./hypertable --test-mode --config hypertable.cfg "
       "< hypertable_test.hql > hypertable_test.output 2>&1";
   if (system(cmd_str.c_str()) != 0)
-    return 1;
+    _exit(1);
 
   cmd_str = "diff hypertable_test.output hypertable_test.golden";
   if (system(cmd_str.c_str()) != 0)
-    return 1;
+    _exit(1);
 
   cmd_str = "gunzip -f hypertable_select_gz_test.output.gz";
   if (system(cmd_str.c_str()) != 0)
-    return 1;
+    _exit(1);
 
   cmd_str = "diff hypertable_select_gz_test.output hypertable_select_gz_test.golden";
   if (system(cmd_str.c_str()) != 0)
-    return 1;
+    _exit(1);
 
-  return 0;
+  /**
+   *  offset-test
+   */
+  cmd_str = "./hypertable --test-mode --config hypertable.cfg "
+      "< offset_test.hql > offset_test.output 2>&1";
+  if (system(cmd_str.c_str()) != 0)
+    _exit(1);
+
+  cmd_str = "diff offset_test.output offset_test.golden";
+  if (system(cmd_str.c_str()) != 0)
+    _exit(1);
+
+  /**
+   *  TIME_ORDER tests
+   */
+  cmd_str = "./hypertable --test-mode --config hypertable.cfg "
+      "< timeorder_test.hql > timeorder_test.output 2>&1";
+  if (system(cmd_str.c_str()) != 0)
+    _exit(1);
+
+  cmd_str = "diff timeorder_test.output timeorder_test.golden";
+  if (system(cmd_str.c_str()) != 0)
+    _exit(1);
+
+  _exit(0);
 }

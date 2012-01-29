@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -39,8 +39,7 @@
 #include "Hypertable/Lib/SerializedKey.h"
 
 #include "../CellStoreFactory.h"
-#include "../CellStoreV4.h"
-#include "../FileBlockCache.h"
+#include "../CellStoreV5.h"
 #include "../Global.h"
 
 #include <cstdlib>
@@ -99,26 +98,27 @@ int main(int argc, char **argv) {
     Global::dfs = new DfsBroker::Client(conn_mgr, addr, 15000);
 
     // force broker client to be destroyed before connection manager
-    client = (DfsBroker::Client *)Global::dfs;
+    client = (DfsBroker::Client *)Global::dfs.get();
 
     if (!client->wait_for_connection(15000)) {
       HT_ERROR("Unable to connect to DFS");
       return 1;
     }
 
-    Global::block_cache = new FileBlockCache(10000000LL, 20000000LL);
-    Global::memory_tracker = new MemoryTracker(Global::block_cache);
+    Global::memory_tracker = new MemoryTracker(0, 0);
 
     String testdir = "/test/CellStore";
     String csname = testdir + "/cs64";
+    TableIdentifier table_id;
+    memset(&table_id, 0, sizeof(table_id));
 
     client->mkdirs(testdir);
 
     Config::properties->set("Hypertable.RangeServer.CellStore.DefaultCompressor", String("none"));
     Config::properties->set("Hypertable.RangeServer.CellStore.DefaultBlockSize", 4*1024*1024);
 
-    cs = new CellStoreV4(Global::dfs);
-    HT_TRY("creating cellstore", cs->create(csname.c_str(), 4096, Config::properties));
+    cs = new CellStoreV5(Global::dfs.get());
+    HT_TRY("creating cellstore", cs->create(csname.c_str(), 4096, Config::properties, &table_id));
 
     // setup value
     value_data = new char [ (1024*1024)+1 ];
@@ -146,8 +146,6 @@ int main(int argc, char **argv) {
       key.length = key_buf.fill();
       cs->add(key, value_bs);
     }
-    TableIdentifier table_id;
-    memset(&table_id, 0, sizeof(table_id));
     cs->finalize(&table_id);
 
     //cs = CellStoreFactory::open(csname, "", Key::END_ROW_MARKER);
@@ -159,7 +157,7 @@ int main(int argc, char **argv) {
 
     std::ofstream out(output_file.c_str(), ios_base::out|ios_base::app);
 
-    SchemaPtr schema = Schema::new_instance(schema_str, strlen(schema_str), true);
+    SchemaPtr schema = Schema::new_instance(schema_str, strlen(schema_str));
     if (!schema->is_valid()) {
       HT_ERRORF("Schema Parse Error: %s", schema->get_error_string());
       exit(1);

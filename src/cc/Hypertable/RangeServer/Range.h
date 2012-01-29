@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -39,11 +39,14 @@
 
 #include "AccessGroup.h"
 #include "CellStore.h"
+#include "LoadFactors.h"
+#include "LoadMetricsRange.h"
 #include "MaintenanceFlag.h"
+#include "MetaLogEntityRange.h"
 #include "Metadata.h"
 #include "RangeMaintenanceGuard.h"
 #include "RangeSet.h"
-#include "SplitPredicate.h"
+#include "RangeTransferInfo.h"
 
 namespace Hypertable {
 
@@ -65,21 +68,25 @@ namespace Hypertable {
       Range *range;
       AccessGroup::MaintenanceData *agdata;
       const char *table_id;
-      uint64_t bytes_read;
-      uint64_t scans;
-      uint64_t cells_read; // only includes cells returned by scans not skipped cells
-      uint64_t bytes_written;
-      uint64_t cells_written;
+      LoadFactors load_factors;
+      uint64_t cells_returned;
+      uint64_t bytes_returned;
       int64_t  purgeable_index_memory;
       int64_t  compact_memory;
+      int64_t soft_limit;
       uint32_t schema_generation;
-      RangeIdentifier range_id;
       int32_t  priority;
       int16_t  state;
       int16_t  maintenance_flags;
+      uint32_t file_count;
+      uint64_t cell_count;
       uint64_t memory_used;
       uint64_t memory_allocated;
+      int64_t key_bytes;
+      int64_t value_bytes;
+      double compression_ratio;
       uint64_t disk_used;
+      uint64_t disk_estimate;
       uint64_t shadow_cache_memory;
       uint64_t block_index_memory;
       uint64_t bloom_filter_memory;
@@ -88,13 +95,18 @@ namespace Hypertable {
       uint32_t bloom_filter_fps;
       bool     busy;
       bool     is_metadata;
+      bool     is_system;
+      bool     relinquish;
+      bool     needs_major_compaction;
+      bool     needs_split;
     };
 
     typedef std::map<String, AccessGroup *> AccessGroupMap;
     typedef std::vector<AccessGroupPtr> AccessGroupVector;
 
     Range(MasterClientPtr &, const TableIdentifier *, SchemaPtr &,
-          const RangeSpec *, RangeSet *, const RangeState *);
+          const RangeSpec *, RangeSet *, const RangeState *, bool needs_compaction=false);
+    Range(MasterClientPtr &, SchemaPtr &, MetaLog::EntityRange *, RangeSet *);
     virtual ~Range() {}
     virtual void add(const Key &key, const ByteString value);
     virtual const char *get_split_row() { return 0; }
@@ -116,7 +128,11 @@ namespace Hypertable {
 
     String start_row() {
       ScopedLock lock(m_mutex);
-      return m_start_row;
+      return m_metalog_entity->spec.start_row;
+    }
+
+    const char *start_row_cstring() const {
+      return m_metalog_entity->spec.start_row;
     }
 
     /**
@@ -124,22 +140,18 @@ namespace Hypertable {
      */
     String end_row() {
       ScopedLock lock(m_mutex);
-      return m_end_row;
+      return m_metalog_entity->spec.end_row;
     }
-    /**
-     * Returns a Range id which is contains the first 8 bytes each of the md5 hashed
-     * start row and end row
-     */
-    RangeIdentifier get_start_end_id() {
-      ScopedLock lock(m_mutex);
-      return m_start_end_id;
+
+    const char *end_row_cstring() {
+      return m_metalog_entity->spec.end_row;
     }
 
     int64_t get_scan_revision();
 
     void replay_transfer_log(CommitLogReader *commit_log_reader);
 
-    MaintenanceData *get_maintenance_data(ByteArena &arena, time_t now);
+    MaintenanceData *get_maintenance_data(ByteArena &arena, time_t now, TableMutator *mutator);
 
     void wait_for_maintenance_to_complete() {
       m_maintenance_guard.wait_for_complete();
@@ -149,9 +161,14 @@ namespace Hypertable {
 
     void split();
 
+    void relinquish();
+
     void compact(MaintenanceFlag::Map &subtask_map);
 
     void purge_memory(MaintenanceFlag::Map &subtask_map);
+
+    void schedule_relinquish() { m_relinquish = true; }
+    bool get_relinquish() const { return m_relinquish; }
 
     void recovery_initialize() {
       ScopedLock lock(m_mutex);
@@ -161,54 +178,75 @@ namespace Hypertable {
 
     void recovery_finalize();
 
-    void increment_update_counter() {
+    bool increment_update_counter() {
+      if (m_dropped)
+        return false;
       m_update_barrier.enter();
+      if (m_dropped) {
+        m_update_barrier.exit();
+        return false;
+      }
+      return true;
     }
     void decrement_update_counter() {
       m_update_barrier.exit();
     }
 
-    void increment_scan_counter() {
+    bool increment_scan_counter() {
+      if (m_dropped)
+        return false;
       m_scan_barrier.enter();
+      if (m_dropped) {
+        m_scan_barrier.exit();
+        return false;
+      }
+      return true;
     }
     void decrement_scan_counter() {
       m_scan_barrier.exit();
     }
 
     /**
-     * @param predicate
+     * @param transfer_info
      * @param split_log
      * @param latest_revisionp
      * @param wait_for_maintenance true if this range has exceeded its capacity and
      *        future requests to this range need to be throttled till split/compaction reduces
      *        range size
-     * @return
+     * @return true if transfer log installed
      */
-    bool get_split_info(SplitPredicate &predicate, CommitLogPtr &split_log,
-                        int64_t *latest_revisionp, bool &wait_for_maintenance) {
-      bool retval;
+    bool get_transfer_info(RangeTransferInfo &transfer_info, CommitLogPtr &transfer_log,
+                           int64_t *latest_revisionp, bool &wait_for_maintenance) {
+      bool retval = false;
       ScopedLock lock(m_mutex);
 
       wait_for_maintenance = false;
       *latest_revisionp = m_latest_revision;
-      if (m_split_log) {
-        predicate.load(m_split_row, m_split_off_high);
-        split_log = m_split_log;
+
+      if (m_transfer_log) {
+        transfer_log = m_transfer_log;
         retval = true;
       }
-      else {
-        predicate.clear();
-        retval = false;
-      }
+
+      if (m_split_row.length())
+        transfer_info.set_split(m_split_row, m_split_off_high);
+      else
+        transfer_info.clear();
+
       if (m_capacity_exceeded_throttle == true)
         wait_for_maintenance = true;
 
       return retval;
     }
 
-    void add_read_data(uint64_t cells, uint64_t bytes) {
-      m_bytes_read += bytes;
-      m_cells_read += cells;
+    void add_read_data(uint64_t cells_scanned, uint64_t cells_returned,
+                       uint64_t bytes_scanned, uint64_t bytes_returned,
+                       uint64_t disk_bytes_read) {
+      m_cells_scanned += cells_scanned;
+      m_cells_returned += cells_returned;
+      m_bytes_scanned += bytes_scanned;
+      m_bytes_returned += bytes_returned;
+      m_disk_bytes_read += disk_bytes_read;
     }
 
     void add_bytes_written(uint64_t n) {
@@ -219,16 +257,14 @@ namespace Hypertable {
       m_cells_written += n;
     }
 
-    uint64_t get_size_limit() { return m_state.soft_limit; }
-
     bool need_maintenance();
 
     bool is_root() { return m_is_root; }
 
     void drop() {
+      Barrier::ScopedActivator block_updates(m_update_barrier);
+      Barrier::ScopedActivator block_scans(m_scan_barrier);
       ScopedLock lock(m_mutex);
-      for (size_t i=0; i<m_access_group_vector.size(); i++)
-        m_access_group_vector[i]->drop();
       m_dropped = true;
     }
 
@@ -237,17 +273,49 @@ namespace Hypertable {
       return (String)m_name;
     }
 
-    int get_state() { return m_state.state; }
+    int get_state() {
+      ScopedLock lock(m_mutex);
+      return m_metalog_entity->state.state;
+    }
 
     int32_t get_error() { return m_error; }
 
+    MetaLog::EntityRange *metalog_entity() { return m_metalog_entity.get(); }
+    void set_needs_compaction(bool needs_compaction) {
+      ScopedLock lock(m_mutex);
+      m_metalog_entity->needs_compaction = needs_compaction;
+    }
+
+    bool get_needs_compaction() {
+      ScopedLock lock(m_mutex);
+      return m_metalog_entity->needs_compaction;
+    }
+
+    void acknowledge_load() {
+      ScopedLock lock(m_mutex);
+      m_metalog_entity->load_acknowledged = true;
+    }
+
+    bool load_acknowledged() {
+      // Not locking this mutex for performance reasons.  Ranges start out
+      // in life unacknowledged and then quickly become acknowledged.
+      // There is a potential race condition at the brief time this variable
+      // is set, but it should not cause any logic problems and saves
+      // us the lock cost every time this method is called.
+      //ScopedLock lock(m_mutex);
+      return m_metalog_entity->load_acknowledged;
+    }
+
   private:
+
+    void initialize();
 
     void load_cell_stores(Metadata *metadata);
 
-    bool extract_csid_from_path(String &path, uint32_t *csidp);
-
     bool cancel_maintenance();
+
+    void relinquish_install_log();
+    void relinquish_compact_and_finish();
 
     void split_install_log();
     void split_compact_and_shrink();
@@ -256,29 +324,31 @@ namespace Hypertable {
     void split_install_log_rollback_metadata();
 
     // these need to be aligned
-    uint64_t         m_bytes_read;
-    uint64_t         m_cells_read;
     uint64_t         m_scans;
-    uint64_t         m_bytes_written;
+    uint64_t         m_cells_scanned;
+    uint64_t         m_cells_returned;
     uint64_t         m_cells_written;
+    uint64_t         m_updates;
+    uint64_t         m_bytes_scanned;
+    uint64_t         m_bytes_returned;
+    uint64_t         m_bytes_written;
+    uint64_t         m_disk_bytes_read;
 
     Mutex            m_mutex;
     Mutex            m_schema_mutex;
     MasterClientPtr  m_master_client;
-    TableIdentifierManaged m_identifier;
+    MetaLog::EntityRangePtr m_metalog_entity;
     SchemaPtr        m_schema;
-    String           m_start_row;
-    String           m_end_row;
     String           m_name;
-    RangeIdentifier  m_start_end_id;
     AccessGroupMap     m_access_group_map;
     AccessGroupVector  m_access_group_vector;
     std::vector<AccessGroup *>       m_column_family_vector;
     RangeMaintenanceGuard m_maintenance_guard;
     int64_t          m_revision;
     int64_t          m_latest_revision;
+    int64_t          m_split_threshold;
     String           m_split_row;
-    CommitLogPtr     m_split_log;
+    CommitLogPtr     m_transfer_log;
     bool             m_split_off_high;
     Barrier          m_update_barrier;
     Barrier          m_scan_barrier;
@@ -286,14 +356,18 @@ namespace Hypertable {
     uint64_t         m_added_deletes[3];
     uint64_t         m_added_inserts;
     RangeSet        *m_range_set;
-    RangeStateManaged m_state;
     int32_t          m_error;
     bool             m_dropped;
     bool             m_capacity_exceeded_throttle;
+    bool             m_relinquish;
+    bool             m_removed_from_working_set;
     int64_t          m_maintenance_generation;
+    LoadMetricsRange m_load_metrics;
   };
 
   typedef intrusive_ptr<Range> RangePtr;
+
+  std::ostream &operator<<(std::ostream &os, const Range::MaintenanceData &mdata);
 
 } // namespace Hypertable
 

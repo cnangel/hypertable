@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -45,20 +45,22 @@ namespace Hypertable {
   class CellFilterInfo {
   public:
     CellFilterInfo(): cutoff_time(0), max_versions(0), counter(false),
-        filter_by_qualifier(false) {}
+        filter_by_exact_qualifier(false), filter_by_regexp_qualifier(false) {}
 
     CellFilterInfo(const CellFilterInfo& other) {
       cutoff_time = other.cutoff_time;
       max_versions = other.max_versions;
       counter = other.counter;
+      regexp_qualifiers.clear();
       for (size_t ii=0; ii<other.regexp_qualifiers.size(); ++ii) {
-        regexp_qualifiers[ii] = new RE2(other.regexp_qualifiers[ii]->pattern());
+        regexp_qualifiers.push_back( new RE2(other.regexp_qualifiers[ii]->pattern()) );
       }
       exact_qualifiers = other.exact_qualifiers;
       for (size_t ii=0; ii<exact_qualifiers.size(); ++ii) {
         exact_qualifiers_set.insert(exact_qualifiers[ii].c_str());
       }
-      filter_by_qualifier = other.filter_by_qualifier;
+      filter_by_exact_qualifier = other.filter_by_exact_qualifier;
+      filter_by_regexp_qualifier = other.filter_by_regexp_qualifier;
     }
 
     ~CellFilterInfo() {
@@ -67,7 +69,7 @@ namespace Hypertable {
     }
 
     bool qualifier_matches(const char *qualifier) {
-      if (!filter_by_qualifier)
+      if (!filter_by_exact_qualifier && !filter_by_regexp_qualifier)
         return true;
       // check exact match first
       if (exact_qualifiers_set.find(qualifier) != exact_qualifiers_set.end())
@@ -86,15 +88,19 @@ namespace Hypertable {
           HT_THROW(Error::BAD_SCAN_SPEC, (String)"Can't convert qualifier " + qualifier +
                    " to regexp -" + regexp->error_arg());
         regexp_qualifiers.push_back(regexp);
+        filter_by_regexp_qualifier = true;
       }
       else {
         exact_qualifiers.push_back(qualifier);
         exact_qualifiers_set.insert(exact_qualifiers.back().c_str());
+        filter_by_exact_qualifier = true;
       }
-      filter_by_qualifier = true;
     }
 
-    bool has_qualifier_filter() const { return filter_by_qualifier; }
+    bool has_qualifier_filter() const {
+      return filter_by_exact_qualifier||filter_by_regexp_qualifier;
+    }
+    bool has_qualifier_regexp_filter() const { return filter_by_regexp_qualifier;}
 
     int64_t  cutoff_time;
     uint32_t max_versions;
@@ -107,7 +113,8 @@ namespace Hypertable {
     vector<String> exact_qualifiers;
     typedef set<const char *, LtCstr> QualifierSet;
     QualifierSet exact_qualifiers_set;
-    bool filter_by_qualifier;
+    bool filter_by_exact_qualifier;
+    bool filter_by_regexp_qualifier;
   };
 
   /**
@@ -117,7 +124,9 @@ namespace Hypertable {
   public:
     SchemaPtr schema;
     const ScanSpec *spec;
+    ScanSpecBuilder scan_spec_builder;
     const RangeSpec *range;
+    RangeSpecManaged range_managed;
     DynamicBuffer dbuf;
     SerializedKey start_serkey, end_serkey;
     Key start_key, end_key;
@@ -134,6 +143,8 @@ namespace Hypertable {
     vector<CellFilterInfo> family_info;
     RE2 *row_regexp;
     RE2 *value_regexp;
+    typedef std::set<const char *, LtCstr, CstrAlloc> CstrRowSet;
+    CstrRowSet rowset;
 
     /**
      * Constructor.
@@ -187,6 +198,13 @@ namespace Hypertable {
       }
     }
 
+    void deep_copy_specs() {
+      scan_spec_builder = *spec;
+      spec = &scan_spec_builder.get();
+      range_managed = *range;
+      range = &range_managed;
+    }
+
   private:
 
     /**
@@ -209,6 +227,8 @@ namespace Hypertable {
      */
     ScanContext(const ScanContext&);
     ScanContext& operator = (const ScanContext&);
+
+    CharArena arena;
   };
 
   typedef intrusive_ptr<ScanContext> ScanContextPtr;

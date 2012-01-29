@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -157,7 +157,9 @@ void RangeServerCommandInterpreter::execute_line(const String &line) {
 
       range_state.soft_limit = 200000000LL;
 
-      m_range_server->load_range(m_addr, *table, range, 0, range_state, 0);
+      m_range_server->load_range(m_addr, *table, range, 0, range_state, false);
+
+      m_range_server->acknowledge_load(m_addr, *table, range);
 
     }
     else if (state.command == COMMAND_UPDATE) {
@@ -356,12 +358,36 @@ void RangeServerCommandInterpreter::execute_line(const String &line) {
     else if (state.command == COMMAND_CLOSE) {
       m_range_server->close(m_addr);
     }
+    else if (state.command == COMMAND_WAIT_FOR_MAINTENANCE) {
+      m_range_server->wait_for_maintenance(m_addr);
+    }
     else if (state.command == COMMAND_SHUTDOWN) {
       m_range_server->close(m_addr);
       m_range_server->shutdown(m_addr);
     }
+    else if (state.command == COMMAND_HEAPCHECK) {
+      m_range_server->heapcheck(m_addr, state.output_file);
+    }
+    else if (state.command == COMMAND_COMPACT) {
+      if (state.table_name != "") {
+        m_range_server->compact(m_addr, table->id, 0);
+      }
+      else {
+        HT_ASSERT(state.flags);
+        m_range_server->compact(m_addr, "", state.flags);
+      }
+    }
+    else if (state.command == COMMAND_METADATA_SYNC) {
+      if (state.table_name != "") {
+        m_range_server->metadata_sync(m_addr, table->id, 0, state.columns);
+      }
+      else {
+        HT_ASSERT(state.flags);
+        m_range_server->metadata_sync(m_addr, "", state.flags, state.columns);
+      }
+    }
     else
-      HT_THROW(Error::HQL_PARSE_ERROR, "unsupported command");
+      HT_THROW(Error::HQL_PARSE_ERROR, format("unsupported command: %d", state.command));
   }
   else
     HT_THROW(Error::HQL_PARSE_ERROR, String("parse error at: ") + info.stop);

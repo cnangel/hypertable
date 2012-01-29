@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2010 Doug Judd (Hypertable, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -21,10 +21,17 @@
 
 package org.hypertable.examples.PerformanceTest;
 
+import java.io.File;
+import java.io.IOException;
+import java.io.RandomAccessFile;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+
 import java.util.Random;
 
 public class DriverCommon {
 
+  public static String VALUE_DATA_FILE;
   public static final String COLUMN_FAMILY = "column";
   public static final String COLUMN_QUALIFIER = "data";
   public static final String INCREMENT_VALUE = "1";
@@ -32,14 +39,23 @@ public class DriverCommon {
   public static final byte [] COLUMN_QUALIFIER_BYTES = "data".getBytes();
   public static final byte [] INCREMENT_VALUE_BYTES = "1".getBytes();
 
-  public void fillRandomDataBuffer() {
-    randomData = new byte [ 262144 ];
-    random.nextBytes(randomData);
+  public void initializeValueData() throws IOException {
+      if (VALUE_DATA_FILE == null || VALUE_DATA_FILE.equals("")) {
+	  byte [] randomData = new byte [ 262144 ];
+	  random.nextBytes(randomData);
+	  valueData = ByteBuffer.wrap(randomData);
+      }
+      else {
+	  File file = new File(VALUE_DATA_FILE);
+	  FileChannel roChannel = new RandomAccessFile(file, "r").getChannel();
+	  valueData = roChannel.map(FileChannel.MapMode.READ_ONLY, 0, (int)roChannel.size());
+      }
   }
 
   public void fillValueBuffer(byte [] value) {
-    int randOffset = random.nextInt(randomData.length - 2*value.length);
-    System.arraycopy(randomData, randOffset, value, 0, value.length);
+    int randOffset = random.nextInt(valueData.capacity() - 2*value.length);
+    valueData.position(randOffset);
+    valueData.get(value, 0, value.length);
   }
 
   /*
@@ -63,6 +79,6 @@ public class DriverCommon {
     }
   }
 
-  protected byte [] randomData;
-  protected Random random = new Random(System.currentTimeMillis());
+  protected Random random = new Random( System.nanoTime() );
+  protected static ByteBuffer valueData;
 }

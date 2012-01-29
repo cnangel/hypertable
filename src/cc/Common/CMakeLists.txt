@@ -1,9 +1,9 @@
 #
-# Copyright(C) 2008 Doug Judd (Zvents, Inc.)
+# Copyright (C) 2007-2012 Hypertable, Inc.
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
-# as published by the Free Software Foundation; either version 2
+# as published by the Free Software Foundation; either version 3
 # of the License, or any later version.
 #
 # This program is distributed in the hope that it will be useful,
@@ -17,6 +17,9 @@
 # 02110-1301, USA.
 #
 
+set(SRC_DIR "${HYPERTABLE_SOURCE_DIR}/src/cc/Common")
+set(DST_DIR "${HYPERTABLE_BINARY_DIR}/src/cc/Common")
+
 set(Common_SRCS
 Abi.cc
 Checksum.cc
@@ -25,6 +28,7 @@ DiscreteRandomGenerator.cc
 DiscreteRandomGeneratorFactory.cc
 DiscreteRandomGeneratorZipf.cc
 Error.cc
+Escaper.cc
 FailureInducer.cc
 FileUtils.cc
 Filesystem.cc
@@ -40,7 +44,10 @@ String.cc
 SuperFastHash.cc
 System.cc
 SystemInfo.cc
-ServerStats.cc
+StatsSerializable.cc
+StatsSystem.cc
+StringCompressorPrefix.cc
+StringDecompressorPrefix.cc
 Time.cc
 Usage.cc
 Version.cc
@@ -53,8 +60,9 @@ endif (${CMAKE_SYSTEM_NAME} MATCHES "SunOS")
 
 add_library(HyperCommon ${Common_SRCS})
 target_link_libraries(HyperCommon ${BOOST_LIBS} ${Log4cpp_LIBRARIES}
-    ${READLINE_LIBRARIES} ${ZLIB_LIBRARIES} ${SIGAR_LIBRARIES}
-    ${NCURSES_LIBRARY} ${CMAKE_THREAD_LIBS_INIT})
+    ${READLINE_LIBRARIES} ${ZLIB_LIBRARIES} ${SNAPPY_LIBRARIES} 
+    ${SIGAR_LIBRARIES} ${NCURSES_LIBRARY} ${CMAKE_THREAD_LIBS_INIT} 
+    ${RE2_LIBRARIES} ${MALLOC_LIBRARY})
 
 add_executable(system_info system_info.cc)
 target_link_libraries(system_info HyperCommon)
@@ -65,6 +73,9 @@ target_link_libraries(ht_checksum HyperCommon)
 # tests
 add_executable(exception_test tests/exception_test.cc)
 target_link_libraries(exception_test HyperCommon)
+
+add_executable(escaper_test tests/escaper_test.cc)
+target_link_libraries(escaper_test HyperCommon)
 
 add_executable(logging_test tests/logging_test.cc)
 target_link_libraries(logging_test HyperCommon)
@@ -114,6 +125,10 @@ target_link_libraries(bloom_filter_test HyperCommon)
 add_executable(hash_test tests/hash_test.cc)
 target_link_libraries(hash_test HyperCommon ${MALLOC_LIBRARY})
 
+# timeinline test
+add_executable(timeinline_test tests/timeinline_test.cc)
+target_link_libraries(timeinline_test HyperCommon ${MALLOC_LIBRARY})
+
 # container tests
 add_executable(container_test tests/container_test.cc)
 target_link_libraries(container_test HyperCommon)
@@ -122,7 +137,22 @@ target_link_libraries(container_test HyperCommon)
 add_executable(md5_base64_test tests/md5_base64_test.cc)
 target_link_libraries(md5_base64_test HyperCommon)
 
+# StatsSerializable test
+add_executable(stats_serialize_test tests/stats_serialize_test.cc)
+target_link_libraries(stats_serialize_test HyperCommon)
+
+# StringCompressor test
+add_executable(string_compressor_test tests/string_compressor_test.cc)
+target_link_libraries(string_compressor_test HyperCommon)
+
+# FailureInducer test
+add_executable(failure_inducer_test tests/failure_inducer_test.cc)
+target_link_libraries(failure_inducer_test HyperCommon)
+configure_file(${SRC_DIR}/tests/failure_inducer_test.golden
+               ${DST_DIR}/failure_inducer_test.golden)
+
 add_test(Common-Exception exception_test)
+add_test(Common-Exception escaper_test)
 add_test(Common-Logging logging_test)
 add_test(Common-Serialization sertest)
 add_test(Common-ScopeGuard scope_guard_test)
@@ -134,6 +164,10 @@ add_test(Common-init ${TEST_DIFF}
   ${CMAKE_CURRENT_SOURCE_DIR}/tests/init_test.golden
   ./init_test --i16 1k --i32 64K --i64 1G --boo)
 add_test(MD5-Base64 md5_base64_test)
+add_test(Common-StatsSystem-serialize stats_serialize_test)
+add_test(Common-StringCompressor string_compressor_test)
+add_test(Common-TimeInline timeinline_test)
+add_test(Common-FailureInducer failure_inducer_test)
 
 set(VERSION_H ${HYPERTABLE_BINARY_DIR}/src/cc/Common/Version.h)
 

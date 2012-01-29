@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -30,8 +30,8 @@ namespace Hypertable {
   public:
     MaintenancePrioritizerLogCleanup(RSStatsPtr &server_stats)
       : MaintenancePrioritizer(server_stats) { }
-    virtual void prioritize(RangeStatsVector &range_data,
-                            MemoryState &memory_state, String &trace_str);
+    virtual void prioritize(RangeStatsVector &range_data, MemoryState &memory_state,
+                            int32_t prioritize, String &trace_str);
 
   private:
     void assign_priorities(RangeStatsVector &range_data, CommitLog *log,

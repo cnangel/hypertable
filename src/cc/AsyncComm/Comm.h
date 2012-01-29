@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2007 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -95,9 +95,10 @@ namespace Hypertable {
      * Adds a proxy name for a TCP connection
      *
      * @param proxy proxy name
+     * @param hostname hostname of remote machine
      * @param addr connection identifier (remote address)
      */
-    int add_proxy(const String &proxy, const InetAddr &addr);
+    int add_proxy(const String &proxy, const String &hostname, const InetAddr &addr);
 
     /**
      * Fills in the proxy map
@@ -295,6 +296,7 @@ namespace Hypertable {
     static Mutex   ms_mutex;
     HandlerMapPtr  m_handler_map;
     ReactorPtr     m_timer_reactor;
+    InetAddr       m_local_addr;
   };
 
 } // namespace Hypertable

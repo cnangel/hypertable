@@ -5,18 +5,43 @@ HYPERTABLE_HOME=$HT_HOME
 HT_SHELL=$HT_HOME/bin/hypertable
 PIDFILE=$HT_HOME/run/Hypertable.RangeServer.pid
 SCRIPT_DIR=`dirname $0`
+startlog=/tmp/start-metadata-split$$.log
 
 . $HT_HOME/bin/ht-env.sh
 
 cleanup_and_abort() {
-    echo $1
     kill %1
+    sleep 10
     if [ -f $PIDFILE ]; then
       kill -9 `cat $PIDFILE`
       rm -f $PIDFILE
     fi
     exit 1
 }
+
+start_masters() {
+
+    $HT_HOME/bin/Hypertable.Master --Hypertable.Master.Port=38050 $@ \
+        --pidfile $HT_HOME/run/Hypertable.Master.38050.pid \
+        --Hypertable.Connection.Retry.Interval=3000 2>&1 &> Hypertable.Master.38050.log&
+    wait_for_server_up "master" "master:38050" "--Hypertable.Master.Port=38050"
+
+    $HT_HOME/bin/Hypertable.Master --Hypertable.Master.Port=38051 \
+        --pidfile $HT_HOME/run/Hypertable.Master.38051.pid \
+        --Hypertable.Connection.Retry.Interval=3000 2>&1 &> Hypertable.Master.38051.log&
+    #wait_for_server_up "master" "master:38051" "--Hypertable.Master.Port=38051"
+    # chris - do not use wait_for_server_up because serverup cannot connect
+    # to this master; it's caught in main(), trying to acquire the hyperspace
+    # lock and not yet able to accept socket connections
+    sleep 5
+    ps `cat $HT_HOME/run/Hypertable.Master.38051.pid`
+    if [ $? != 0 ] ; then
+      echo "Master (38051) not running, exiting...";
+      exit 1
+    fi
+    echo "Master (38051) seems to be running"
+}
+
 
 stop_range_server() {
   # stop any existing range server if necessary
@@ -26,7 +51,7 @@ stop_range_server() {
     sleep 3
 
     if $HT_HOME/bin/ht serverup --silent rangeserver; then
-      echo "Can't stop range server, exiting"
+      echo "Can't stop range server, exiting..."
       ps -ef | grep Hypertable.RangeServer
       exit 1
     fi
@@ -39,21 +64,51 @@ set_tests() {
   done
 }
 
+save_failure_state() {
+  echo "USE sys; SELECT * FROM METADATA RETURN_DELETES DISPLAY_TIMESTAMPS;" | $HT_HOME/bin/ht shell --batch >& metadata.dump
+  tar czvf fs-backup.tgz $HT_HOME/fs/local
+  ARCHIVE_DIR="archive-"`date | sed 's/ /-/g'`
+  mkdir $ARCHIVE_DIR
+  mv metadata.dump fs-backup.tgz core.* select* dump.tsv rangeserver.output* error* failed* running* $ARCHIVE_DIR
+  cp $HT_HOME/log/Hypertable.Master.log $ARCHIVE_DIR
+  if [ -e Testing/Temporary/LastTest.log.tmp ] ; then
+    mv Testing/Temporary/LastTest.log.tmp $ARCHIVE_DIR
+  elif [ -e ../../../Testing/Temporary/LastTest.log.tmp ] ; then
+    mv ../../../Testing/Temporary/LastTest.log.tmp $ARCHIVE_DIR
+  fi
+  echo "Failure state saved to directory $ARCHIVE_DIR"
+  #exec 1>&-
+  #sleep 86400
+}
+
 # Runs an individual test
 run_test() {
   local TEST_ID=$1
   shift;
 
+  touch running.$TEST_ID
+
   if [ -z "$SKIP_START_SERVERS" ]; then
     $HT_HOME/bin/start-test-servers.sh --no-rangeserver --no-thriftbroker \
-                                       --clear
+                                       --clear --Hypertable.Master.Gc.Interval=30000
   fi
 
-  stop_range_server
+  if [ $TEST_ID == 10 ] || [ $TEST_ID == 11 ] || [ $TEST_ID == 12 ] || [ $TEST_ID == 13 ] ; then
+      kill -9 `cat $HT_HOME/run/Hypertable.Master*.pid`
+      stop_range_server
+      start_masters $@
+      $HT_HOME/bin/ht Hypertable.RangeServer --verbose --pidfile=$PIDFILE \
+          --Hypertable.RangeServer.Range.SplitSize=25K \
+          --Hypertable.RangeServer.CellStore.DefaultBlockSize=1K \
+          --Hypertable.RangeServer.Range.MetadataSplitSize=10K \
+          --Hypertable.RangeServer.MaintenanceThreads=8 \
+          --Hypertable.RangeServer.Maintenance.Interval=100 2>&1 &> rangeserver.output &
+  else
+      stop_range_server
+      $SCRIPT_DIR/rangeserver-launcher.sh $@ > rangeserver.output.$TEST_ID 2>&1 &
+  fi
 
-  $SCRIPT_DIR/rangeserver-launcher.sh $@ > rangeserver.output.$TEST_ID 2>&1 &
-
-  # give rangeserver time to get registered etc 
+  # give servers time to come up
   sleep 2;
 
   $HT_SHELL --batch < $SCRIPT_DIR/create-table.hql
@@ -61,36 +116,46 @@ run_test() {
       # try again
       $HT_SHELL --batch < $SCRIPT_DIR/create-table.hql
       if [ $? != 0 ] ; then
-          cleanup_and_abort "Unable to create table 'LoadTest', exiting ..."
+          echo "Error creating table 'LoadTest', shell returned %?"
+          save_failure_state
+          cleanup_and_abort
       fi
   fi
 
-  $HT_HOME/bin/ht ht_load_generator update --spec-file=$SCRIPT_DIR/data.spec --max-bytes=500K
+  $HT_HOME/bin/ht ht_load_generator update --spec-file=$SCRIPT_DIR/data.spec --max-bytes=300K \
+      --Hypertable.Mutator.ScatterBuffer.FlushLimit.PerServer=11K
+
   if [ $? != 0 ] ; then
-      cleanup_and_abort "Problem loading table 'LoadTest', exiting ..."
+      echo "Error loading table 'LoadTest', shell returned $?"
+      save_failure_state
+      cleanup_and_abort 
   fi
 
-  sleep 5
+  sleep 1
+  echo "wait for maintenance;" | $HT_HOME/bin/ht ht_rsclient --batch  
 
   fgrep ERROR rangeserver.output.$TEST_ID | fgrep -v FailureInducer | fgrep -v skew > error.$TEST_ID
 
-  fgrep ERROR error.$TEST_ID
-
-  if [ $? == 0 ] ; then
-      kill -9 `cat $PIDFILE`
-      exit 1
+  if [ -s error.$TEST_ID ] ; then
+      touch failed.$TEST_ID
+      save_failure_state
+      cleanup_and_abort 
   fi
 
   if [ -e core.* ] ; then
-      echo "core file generated, moved to /tmp"
-      mv core.* /tmp
-      kill -9 `cat $PIDFILE`
-      exit 1
+      echo "ERROR: core file generated"
+      touch failed.$TEST_ID
+      save_failure_state
+      cleanup_and_abort 
   fi
+
+  /bin/rm -f select-a.$TEST_ID select-b.$TEST_ID
 
   echo "USE '/'; SELECT * FROM LoadTest INTO FILE 'select-a.$TEST_ID';" | $HT_HOME/bin/ht shell --batch
 
-  $HT_HOME/bin/ht shell --batch < $SCRIPT_DIR/dump-table.hql > dump.tsv
+  /bin/rm -f dump.tsv 
+
+  echo "USE '/'; DUMP TABLE LoadTest INTO FILE 'dump.tsv';" | $HT_HOME/bin/ht shell --batch
 
   echo "USE '/'; DROP TABLE IF EXISTS LoadTest; CREATE TABLE LoadTest ( Field );" | $HT_HOME/bin/ht shell --batch
 
@@ -102,20 +167,15 @@ run_test() {
   if [ $? != 0 ] ; then
     echo "Test $TEST_ID FAILED." >> report.txt
     echo "Test $TEST_ID FAILED." >> errors.txt
-    #exec 1>&-
-    #sleep 86400
+    touch failed.$TEST_ID
   else
     echo "Test $TEST_ID PASSED." >> report.txt
   fi
+
+  /bin/rm -f running.$TEST_ID
 }
 
-if [ "$TEST_0" ] || [ "$TEST_1" ] ; then
-    rm -f errors.txt
-fi
-
-rm -f report.txt
-
-env | grep '^TEST_[0-9]=' || set_tests 0 1 2 3 4 5 6 7 8 9
+env | grep '^TEST_[0-9]' || set_tests 0 1 2 3 4 5 6 7 8 9 10 11 12 13
 
 [ "$TEST_0" ] && run_test 0
 [ "$TEST_1" ] && run_test 1 "--induce-failure=metadata-split-1:exit:0"
@@ -127,12 +187,18 @@ env | grep '^TEST_[0-9]=' || set_tests 0 1 2 3 4 5 6 7 8 9
 [ "$TEST_7" ] && run_test 7 "--induce-failure=metadata-load-range-3:exit:2"
 [ "$TEST_8" ] && run_test 8 "--induce-failure=metadata-load-range-4:exit:2"
 [ "$TEST_9" ] && run_test 9 "--induce-failure=metadata-load-range-5:exit:2"
+[ "$TEST_10" ] && run_test 10 "--induce-failure=connection-handler-before-id-response:exit:2"
+[ "$TEST_11" ] && run_test 11 "--induce-failure=move-range-INITIAL-a:exit:0"
+[ "$TEST_12" ] && run_test 12 "--induce-failure=move-range-STARTED:exit:0"
+[ "$TEST_13" ] && run_test 13 "--induce-failure=move-range-LOAD_RANGE:exit:0"
 
-if [ -e errors.txt ] && [ "$TEST_4" ] ; then
-    ARCHIVE_DIR="archive-"`date | sed 's/ /-/g'`
-    mkdir $ARCHIVE_DIR
-    mv core.* select.* dump.tsv rangeserver.output.* errors.txt $ARCHIVE_DIR
+if [ "$TEST_9" ] ; then
+  if [ -e running* ] || [ -e failed* ]; then
+    save_failure_state
+  fi
+  /bin/rm -f core.* select* dump.tsv rangeserver.output.* error* running* failed*
 fi
+
 
 kill %1
 if [ -f $PIDFILE ]; then

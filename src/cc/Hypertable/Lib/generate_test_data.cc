@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -144,6 +144,8 @@ int main(int argc, char **argv) {
   if (tablename == "")
     Usage::dump_and_exit(usage);
 
+  System::seed(seed);
+
   client = new Client(System::locate_install_dir(argv[0]), cfgfile);
   ns = client->open_namespace("/");
 
@@ -158,9 +160,14 @@ int main(int argc, char **argv) {
     return e.code();
   }
 
-  schema = Schema::new_instance(schemaspec.c_str(), schemaspec.length(), true);
+  schema = Schema::new_instance(schemaspec.c_str(), schemaspec.length());
   if (!schema->is_valid()) {
     HT_ERRORF("Schema Parse Error: %s", schema->get_error_string());
+    exit(1);
+  }
+
+  if (schema->need_id_assignment()) {
+    HT_ERROR("Schema Parse Error: needs ID assignment");
     exit(1);
   }
 

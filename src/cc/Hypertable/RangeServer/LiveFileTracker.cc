@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -23,6 +23,7 @@
 
 #include "Hypertable/Lib/Key.h"
 
+#include "Global.h"
 #include "LiveFileTracker.h"
 #include "MetadataNormal.h"
 #include "MetadataRoot.h"
@@ -35,10 +36,25 @@ LiveFileTracker::LiveFileTracker(const TableIdentifier *identifier,
                                  const String &ag_name) :
   m_identifier(*identifier), m_schema_ptr(schema_ptr),
   m_start_row(range->start_row), m_end_row(range->end_row),
-  m_ag_name(ag_name), m_need_update(false), m_is_root(false) {
+  m_ag_name(ag_name), m_need_update(false), m_is_root(false),
+  m_last_nextcsid(0), m_cur_nextcsid(0), m_total_blocks(0) {
 
   m_is_root = (m_identifier.is_metadata() && *range->start_row == 0
                && !strcmp(range->end_row, Key::END_ROOT_ROW));
+
+  m_file_basename = Global::toplevel_dir + "/tables/";
+
+}
+
+void LiveFileTracker::update_live(const String &add, std::vector<String> &deletes, uint32_t nextcsid, int64_t total_blocks) {
+  ScopedLock lock(m_mutex);
+  for (size_t i=0; i<deletes.size(); i++)
+    m_live.erase(strip_basename(deletes[i]));
+  if (add != "")
+    m_live.insert(strip_basename(add));
+  m_cur_nextcsid = nextcsid;
+  m_total_blocks = total_blocks;
+  m_need_update = true;
 }
 
 
@@ -46,9 +62,9 @@ void LiveFileTracker::add_references(const std::vector<String> &filev) {
   ScopedLock lock(m_mutex);
   FileRefCountMap::iterator iter;
   for (size_t i=0; i<filev.size(); i++) {
-    iter = m_referenced.find(filev[i]);
+    iter = m_referenced.find(strip_basename(filev[i]));
     if (iter == m_referenced.end())
-      m_referenced[filev[i]] = 1;
+      m_referenced[strip_basename(filev[i])] = 1;
     else
       (*iter).second++;
   }
@@ -63,11 +79,11 @@ void LiveFileTracker::remove_references(const std::vector<String> &filev) {
   ScopedLock lock(m_mutex);
   FileRefCountMap::iterator iter;
   for (size_t i=0; i<filev.size(); i++) {
-    iter = m_referenced.find(filev[i]);
+    iter = m_referenced.find(strip_basename(filev[i]));
     HT_ASSERT(iter != m_referenced.end());
     if (--(*iter).second == 0) {
       m_referenced.erase(iter);
-      if (m_blocked.count(filev[i]) > 0)
+      if (m_blocked.count(strip_basename(filev[i])) > 0)
         m_need_update = true;
     }
   }
@@ -80,6 +96,7 @@ void LiveFileTracker::update_files_column() {
     return;
 
   String file_list;
+  String printable_list;
   String end_row;
   int retry_count = 0;
 
@@ -90,13 +107,16 @@ void LiveFileTracker::update_files_column() {
 
   m_mutex.lock();
 
-  foreach(const String &file, m_live)
+  foreach(const String &file, m_live) {
     file_list += file + ";\n";
+    printable_list += file + "; ";
+  }
 
   m_blocked.clear();
   foreach(const FileRefCountMap::value_type &v, m_referenced) {
     if (m_live.count(v.first) == 0) {
       file_list += format("#%s;\n", v.first.c_str());
+      printable_list += String("#") + v.first + "; ";
       m_blocked.insert(v.first);
     }
   }
@@ -109,11 +129,21 @@ void LiveFileTracker::update_files_column() {
   try {
     if (m_is_root) {
       MetadataRoot metadata(m_schema_ptr);
-      metadata.write_files(m_ag_name, file_list);
+      if (m_cur_nextcsid != m_last_nextcsid) {
+        metadata.write_files(m_ag_name, file_list, m_total_blocks, m_cur_nextcsid);
+        m_last_nextcsid = m_cur_nextcsid;
+      }
+      else
+        metadata.write_files(m_ag_name, file_list, m_total_blocks);
     }
     else {
       MetadataNormal metadata(&m_identifier, end_row);
-      metadata.write_files(m_ag_name, file_list);
+      if (m_cur_nextcsid != m_last_nextcsid) {
+        metadata.write_files(m_ag_name, file_list, m_total_blocks, m_cur_nextcsid);
+        m_last_nextcsid = m_cur_nextcsid;
+      }
+      else
+        metadata.write_files(m_ag_name, file_list, m_total_blocks);
     }
     HT_MAYBE_FAIL("LiveFileTracker-update_files_column");
   }
@@ -135,7 +165,7 @@ void LiveFileTracker::update_files_column() {
 }
 
 
-void LiveFileTracker::get_file_list(String &file_list, bool include_blocked) {
+void LiveFileTracker::get_file_data(String &file_list, int64_t *block_countp, bool include_blocked) {
   ScopedLock lock(m_mutex);
 
   file_list = "";
@@ -153,6 +183,11 @@ void LiveFileTracker::get_file_list(String &file_list, bool include_blocked) {
     }
   }
 
+  *block_countp = m_total_blocks;
 }
 
-
+String LiveFileTracker::strip_basename(const String &fname) {
+  size_t basename_len = m_file_basename.length();
+  HT_ASSERT(!strncmp(fname.c_str(), m_file_basename.c_str(), basename_len));
+  return fname.substr(basename_len);
+}

@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2007 Luke Lu (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -22,8 +22,8 @@
 #include "Common/Compat.h"
 #include "Common/Config.h"
 #include "Common/Logger.h"
+#include "Common/Serialization.h"
 #include "Common/SystemInfo.h"
-#include "Common/Stopwatch.h"
 #include "Common/Mutex.h"
 
 extern "C" {
@@ -35,9 +35,166 @@ extern "C" {
 #include <stdlib.h>
 }
 
+#if defined(TCMALLOC) || defined(TCMALLOC_MINIMAL)
+#include <google/malloc_extension.h>
+#endif
+
 #define HT_FIELD_NOTIMPL(_field_) (_field_ == (uint64_t)-1)
 
 using namespace Hypertable;
+
+bool CpuInfo::operator==(const CpuInfo &other) const {
+  if (vendor == other.vendor &&
+      model == other.model &&
+      mhz == other.mhz &&
+      cache_size == other.cache_size &&
+      total_sockets == other.total_sockets &&
+      total_cores == other.total_cores &&
+      cores_per_socket == other.cores_per_socket)
+    return true;
+  return false;
+}
+
+bool CpuStat::operator==(const CpuStat &other) const {
+  if (Serialization::equal(user, other.user) &&
+      Serialization::equal(sys, other.sys) &&
+      Serialization::equal(nice, other.nice) &&
+      Serialization::equal(idle, other.idle) &&
+      Serialization::equal(wait, other.wait) &&
+      Serialization::equal(irq, other.irq) &&
+      Serialization::equal(soft_irq, other.soft_irq) &&
+      Serialization::equal(stolen, other.stolen) &&
+      Serialization::equal(total, other.total))
+    return true;
+  return false;
+}
+
+bool LoadAvgStat::operator==(const LoadAvgStat &other) const {
+  if (Serialization::equal(loadavg[0], other.loadavg[0]) &&
+      Serialization::equal(loadavg[1], other.loadavg[1]) &&
+      Serialization::equal(loadavg[2], other.loadavg[2]))
+    return true;
+  return false;
+}
+
+bool MemStat::operator==(const MemStat &other) const {
+  if (Serialization::equal(ram, other.ram) &&
+      Serialization::equal(total, other.total) &&
+      Serialization::equal(used, other.used) &&
+      Serialization::equal(free, other.free) &&
+      Serialization::equal(actual_used, other.actual_used) &&
+      Serialization::equal(actual_free, other.actual_free))
+    return true;
+  return false;
+}
+
+bool DiskStat::operator==(const DiskStat &other) const {
+  if (prefix == other.prefix &&
+      Serialization::equal(reads_rate, other.reads_rate) &&
+      Serialization::equal(writes_rate, other.writes_rate) &&
+      Serialization::equal(read_rate, other.read_rate) &&
+      Serialization::equal(write_rate, other.write_rate))
+    return true;
+  return false;
+}
+
+bool SwapStat::operator==(const SwapStat &other) const {
+  if (Serialization::equal(total, other.total) &&
+      Serialization::equal(used, other.used) &&
+      Serialization::equal(free, other.free) &&
+      page_in == other.page_in &&
+      page_out == other.page_out)
+    return true;
+  return false;
+}
+
+bool NetInfo::operator==(const NetInfo &other) const {
+  if (host_name == other.host_name &&
+      primary_if == other.primary_if &&
+      primary_addr == other.primary_addr &&
+      default_gw == other.default_gw)
+    return true;
+  return false;
+}
+
+bool NetStat::operator==(const NetStat &other) const {
+  if (tcp_established == other.tcp_established &&
+      tcp_listen == other.tcp_listen &&
+      tcp_time_wait == other.tcp_time_wait &&
+      tcp_close_wait == other.tcp_close_wait &&
+      tcp_idle == other.tcp_idle &&
+      Serialization::equal(rx_rate, other.rx_rate) &&
+      Serialization::equal(tx_rate, other.tx_rate))
+    return true;
+  return false;
+}
+
+bool OsInfo::operator==(const OsInfo &other) const {
+  if (name == other.name &&
+      version == other.version &&
+      version_major == other.version_major &&
+      version_minor == other.version_minor &&
+      version_micro == other.version_micro &&
+      arch == other.arch &&
+      machine == other.machine &&
+      description == other.description &&
+      patch_level == other.patch_level &&
+      vendor == other.vendor &&
+      vendor_version == other.vendor_version &&
+      vendor_name == other.vendor_name &&
+      code_name == other.code_name)
+    return true;
+  return false;
+}
+
+bool ProcInfo::operator==(const ProcInfo &other) const {
+  if (pid == other.pid &&
+      user == other.user &&
+      exe == other.exe &&
+      cwd == other.cwd &&
+      root == other.root &&
+      args == other.args)
+    return true;
+  return false;
+}
+
+bool ProcStat::operator==(const ProcStat &other) const {
+  if (cpu_user == other.cpu_user &&
+      cpu_sys == other.cpu_sys &&
+      cpu_total == other.cpu_total &&
+      Serialization::equal(cpu_pct, other.cpu_pct) &&
+      Serialization::equal(vm_size, other.vm_size) &&
+      Serialization::equal(vm_resident, other.vm_resident) &&
+      Serialization::equal(vm_share, other.vm_share) &&
+      minor_faults == other.minor_faults &&
+      major_faults == other.major_faults &&
+      page_faults == other.page_faults &&
+      heap_size == other.heap_size &&
+      heap_slack == other.heap_slack)
+    return true;
+  return false;
+}
+
+bool FsStat::operator==(const FsStat &other) const {
+  if (prefix == other.prefix &&
+      total == other.total &&
+      free == other.free &&
+      used == other.used &&
+      avail == other.avail &&
+      Serialization::equal(use_pct, other.use_pct) &&
+      files == other.files &&
+      free_files == other.free_files)
+    return true;
+  return false;
+}
+
+bool TermInfo::operator==(const TermInfo &other) const {
+  if (term == other.term &&
+      num_lines == other.num_lines &&
+      num_cols == other.num_cols)
+    return true;
+  return false;
+}
 
 namespace {
 
@@ -61,11 +218,6 @@ sigar_net_interface_stat_t _prev_net_stat, *_prev_net_statp = NULL;
 Stopwatch _net_stat_stopwatch;
 const int DEFAULT_NET_STAT_FLAGS =
     SIGAR_NETCONN_CLIENT|SIGAR_NETCONN_SERVER|SIGAR_NETCONN_TCP;
-
-// for computing disk io rate
-RecMutex _disk_mutex;
-sigar_disk_usage_t _prev_disk_stat, *_prev_disk_statp = NULL;
-Stopwatch _disk_stat_stopwatch;
 
 // info/stat singletons
 CpuInfo _cpu_info, *_cpu_infop = NULL;
@@ -296,7 +448,6 @@ CpuStat &CpuStat::refresh() {
 LoadAvgStat &LoadAvgStat::refresh() {
   ScopedRecLock lock(_mutex);
   sigar_loadavg_t m;
-
   HT_ASSERT(sigar_loadavg_get(sigar(), &m) == SIGAR_OK);
 
   loadavg[0] = m.loadavg[0];
@@ -322,52 +473,44 @@ MemStat &MemStat::refresh() {
   return *this;
 }
 
+DiskStat::~DiskStat() {
+  delete (sigar_disk_usage_t *)prev_stat;
+}
+
 DiskStat &DiskStat::refresh(const char *dir_prefix) {
-  ScopedRecLock disk_lock(_disk_mutex);
-  bool need_pause = false;
-  {
-    ScopedRecLock lock(_mutex);
+  ScopedRecLock lock(_mutex);
+  sigar_disk_usage_t s;
 
-    if ((prefix != dir_prefix || !_prev_disk_statp)
-        && compute_disk_usage(dir_prefix, _prev_disk_stat)) {
-      HT_DEBUGF("prev_disk_stat: reads=%llu, reads=%llu, read_bytes=%llu "
-                "write_bytes=%llu", (Llu)_prev_disk_stat.reads,
-                (Llu)_prev_disk_stat.writes, (Llu)_prev_disk_stat.read_bytes,
-                (Llu)_prev_disk_stat.write_bytes);
-      _prev_disk_statp = &_prev_disk_stat;
-      prefix = dir_prefix;
-      need_pause = true;
+  memset(&s, 0, sizeof(s));
+
+  if (compute_disk_usage(dir_prefix, s)) {
+    HT_DEBUGF("curr_disk_stat: reads=%llu, reads=%llu, read_bytes=%llu "
+	      "write_bytes=%llu", (Llu)s.reads, (Llu)s.writes,
+	      (Llu)s.read_bytes, (Llu)s.write_bytes);
+
+    if (prev_stat) {
+      stopwatch.stop();
+      double elapsed = stopwatch.elapsed();
+      reads_rate = (s.reads - ((sigar_disk_usage_t *)prev_stat)->reads) / elapsed;
+      writes_rate = (s.writes - ((sigar_disk_usage_t *)prev_stat)->writes) / elapsed;
+      read_rate =
+	(s.read_bytes - ((sigar_disk_usage_t *)prev_stat)->read_bytes) / elapsed;
+      write_rate =
+	(s.write_bytes - ((sigar_disk_usage_t *)prev_stat)->write_bytes) / elapsed;
     }
-    prefix = dir_prefix;
+    else
+      prev_stat = new sigar_disk_usage_t();
+
+    *((sigar_disk_usage_t *)prev_stat) = s;
+    stopwatch.reset();
+    stopwatch.start();
   }
-  if (need_pause)
-    poll(0, 0, DEFAULT_PAUSE);
-  {
-    ScopedRecLock lock(_mutex);
 
-    if (_prev_disk_statp) {
-      sigar_disk_usage_t s;
-
-      if (compute_disk_usage(dir_prefix, s)) {
-        HT_DEBUGF("curr_disk_stat: reads=%llu, reads=%llu, read_bytes=%llu "
-                  "write_bytes=%llu", (Llu)s.reads, (Llu)s.writes,
-                  (Llu)s.read_bytes, (Llu)s.write_bytes);
-        _disk_stat_stopwatch.stop();
-        double elapsed = _disk_stat_stopwatch.elapsed();
-
-        reads_rate = (s.reads - _prev_disk_stat.reads) / elapsed;
-        writes_rate = (s.writes - _prev_disk_stat.writes) / elapsed;
-        read_rate =
-            (s.read_bytes - _prev_disk_stat.read_bytes) / elapsed / MiB;
-        write_rate =
-            (s.write_bytes - _prev_disk_stat.write_bytes) / elapsed / MiB;
-
-        _prev_disk_stat = s;
-        _disk_stat_stopwatch.start();
-      }
-    }
-  }
   return *this;
+}
+
+SwapStat::~SwapStat() {
+  delete (sigar_swap_t *)prev_stat;
 }
 
 SwapStat &SwapStat::refresh() {
@@ -379,8 +522,18 @@ SwapStat &SwapStat::refresh() {
   total = s.total / MiB;
   used = s.used / MiB;
   free = s.free / MiB;
-  page_in = s.page_in;
-  page_out = s.page_out;
+
+  if (prev_stat) {
+    page_in = s.page_in - ((sigar_swap_t *)prev_stat)->page_in;
+    page_out = s.page_out - ((sigar_swap_t *)prev_stat)->page_out;
+  }
+  else {
+    prev_stat = new sigar_swap_t();
+    page_in = s.page_in;
+    page_out = s.page_out;
+  }
+
+  *((sigar_swap_t *)prev_stat) = s;
 
   return *this;
 }
@@ -499,10 +652,11 @@ NetStat &NetStat::refresh() {
         HT_DEBUGF("curr_net_stat: rx_bytes=%llu, tx_bytes=%llu",
                   (Llu)curr.rx_bytes, (Llu)curr.tx_bytes);
 
-        rx_rate = (curr.rx_bytes - _prev_net_stat.rx_bytes) / elapsed / KiB;
-        tx_rate = (curr.tx_bytes - _prev_net_stat.tx_bytes) / elapsed / KiB;
+        rx_rate = (curr.rx_bytes - _prev_net_stat.rx_bytes) / elapsed;
+        tx_rate = (curr.tx_bytes - _prev_net_stat.tx_bytes) / elapsed;
 
         _prev_net_stat = curr;
+        _net_stat_stopwatch.reset();
         _net_stat_stopwatch.start();
       }
     }
@@ -554,6 +708,13 @@ ProcStat &ProcStat::refresh() {
   minor_faults = HT_FIELD_NOTIMPL(m.minor_faults) ? 0 : m.minor_faults;
   major_faults = HT_FIELD_NOTIMPL(m.major_faults) ? 0 : m.major_faults;
   page_faults = HT_FIELD_NOTIMPL(m.page_faults) ? 0 : m.page_faults;;
+#if defined(TCMALLOC) || defined(TCMALLOC_MINIMAL)
+  size_t tmp_heap_size, tmp_heap_slack;
+  MallocExtension::instance()->GetNumericProperty("generic.heap_size", &tmp_heap_size);
+  heap_size = tmp_heap_size;
+  MallocExtension::instance()->GetNumericProperty("tcmalloc.slack_bytes", &tmp_heap_slack);
+  heap_slack = tmp_heap_slack;
+#endif
 
   return *this;
 }
@@ -564,11 +725,11 @@ FsStat &FsStat::refresh(const char *dir_prefix) {
   prefix = dir_prefix;
 
   if (compute_fs_usage(dir_prefix, u)) {
-    use_pct = u.use_percent * 100.;
-    total = u.total / MiB; // u.total already in KB
-    free = u.free / MiB;
-    used = u.used / MiB;
-    avail = u.avail / MiB;
+    use_pct = u.use_percent * 100.0;
+    total = u.total; // u.total already in KB
+    free = u.free;
+    used = u.used;
+    avail = u.avail;
     files = u.files;
     free_files = u.free_files;
   }
@@ -685,6 +846,7 @@ std::ostream &operator<<(std::ostream &out, const ProcStat &s) {
       <<"\n vm_size="<< s.vm_size <<" vm_resident="<< s.vm_resident
       <<" vm_share="<< s.vm_share <<"\n major_faults="<< s.major_faults
       <<" minor_faults="<< s.minor_faults <<" page_faults="<< s.page_faults
+      <<" heap_size="<< s.heap_size <<" heap_slack="<< s.heap_slack
       <<'}';
   return out;
 }

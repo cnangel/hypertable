@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -22,6 +22,9 @@
 #ifndef HYPERTABLE_CELLSTORE_H
 #define HYPERTABLE_CELLSTORE_H
 
+#include <vector>
+
+#include "Common/String.h"
 #include "Common/ByteString.h"
 #include "Common/Filesystem.h"
 
@@ -52,6 +55,8 @@ namespace Hypertable {
       uint64_t block_index_access_counter;
     };
 
+    CellStore() : m_bytes_read(0) { }
+
     virtual ~CellStore() { return; }
 
     virtual void add(const Key &key, const ByteString value) = 0;
@@ -70,9 +75,10 @@ namespace Hypertable {
      * @param max_entries maximum number of entries the cell store is
      *        expected to have
      * @param props cellstore specific properties
+     * @param table_identifier table identifier
      */
     virtual void create(const char *fname, size_t max_entries,
-                        PropertiesPtr &props) = 0;
+                        PropertiesPtr &props, const TableIdentifier *table_id=0) = 0;
 
     /**
      * Finalizes the creation of a cell store, by writing block index and
@@ -182,6 +188,18 @@ namespace Hypertable {
     virtual KeyDecompressor *create_key_decompressor();
 
     /**
+     * Sets the cell store files replaced by this CellStore
+     */
+    virtual void set_replaced_files(const std::vector<String> &old_files);
+
+    /**
+     * Returns all the cell store files replaced by this CellStore
+     *
+     * @return vector of strings with names of the files that this cell store replaces
+     */
+    virtual const std::vector<String> &get_replaced_files();
+
+    /**
      * Displays block information to stdout
      */
     virtual void display_block_info() = 0;
@@ -249,12 +267,22 @@ namespace Hypertable {
      */
     virtual bool restricted_range() = 0;
 
+    /**
+     * Returns the number of "uncompressed" bytes read from the underlying
+     * filesystem.
+     *
+     * @return number of uncompressed bytes read from filesystem
+     */
+    uint64_t bytes_read() { return m_bytes_read; }
+
     static const char DATA_BLOCK_MAGIC[10];
     static const char INDEX_FIXED_BLOCK_MAGIC[10];
     static const char INDEX_VARIABLE_BLOCK_MAGIC[10];
 
+    uint64_t m_bytes_read;
     IndexMemoryStats m_index_stats;
-
+    std::vector <String> m_replaced_files;
+    TableIdentifierManaged m_table_identifier;
   };
 
   typedef intrusive_ptr<CellStore> CellStorePtr;

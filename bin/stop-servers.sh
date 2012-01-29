@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Copyright 2008 Doug Judd (Zvents, Inc.)
+# Copyright (C) 2007-2012 Hypertable, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -81,19 +81,14 @@ while [ "$1" != "${1##[-+]}" ]; do
 done
 
 
-
-#
-# Stop RangeServer
-#
-if [ $STOP_RANGESERVER == "true" ] ; then
-  echo "Sending shutdown command"
-  echo 'shutdown;quit' | $HYPERTABLE_HOME/bin/ht_rsclient --batch --no-hyperspace
-  # wait for rangeserver shutdown
-  wait_for_server_shutdown rangeserver "range server" "$@"
-  if [ $FORCE == "true" ] ; then
-      stop_server rangeserver
-  fi
+if [ ! -e $HYPERTABLE_HOME/bin/ht_master_client ] ; then
+  STOP_MASTER="false"
 fi
+
+if [ ! -e $HYPERTABLE_HOME/bin/ht_rsclient ] ; then
+  STOP_RANGESERVER="false"
+fi
+
 
 #
 # Stop TestClient
@@ -117,18 +112,40 @@ if [ $STOP_THRIFTBROKER == "true" ] ; then
 fi
 
 #
-# Stop DFSBroker
-#
-if [ $STOP_DFSBROKER == "true" ] ; then
-  stop_server dfsbroker
-fi
-
-#
 # Stop Master
 #
 if [ $STOP_MASTER == "true" ] ; then
-  stop_server master 
+  echo 'shutdown;quit;' | $HYPERTABLE_HOME/bin/ht master_client --batch
+  # wait for master shutdown
+  wait_for_server_shutdown master "master" "$@"
+  if [ $? != 0 ] ; then
+      stop_server master
+  fi
 fi
+
+#
+# Stop RangeServer
+#
+if [ $STOP_RANGESERVER == "true" ] ; then
+  echo "Sending shutdown command"
+  echo 'shutdown;quit' | $HYPERTABLE_HOME/bin/ht rsclient --batch --no-hyperspace
+  # wait for rangeserver shutdown
+  wait_for_server_shutdown rangeserver "range server" "$@"
+  if [ $? != 0 ] ; then
+      stop_server master
+  fi
+fi
+
+
+#
+# Stop DFSBroker
+#
+if [ $STOP_DFSBROKER == "true" ] ; then
+  echo "Sending shutdown command to DFS broker"
+  echo 'shutdown' | $HYPERTABLE_HOME/bin/ht dfsclient --nowait --batch
+  stop_server dfsbroker
+fi
+
 
 #
 # Stop Hyperspace

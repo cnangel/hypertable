@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -33,9 +33,9 @@ extern "C" {
 #include "AsyncComm/ApplicationQueue.h"
 #include "AsyncComm/ResponseCallback.h"
 
-#include "Hypertable/Lib/MasterClient.h"
 #include "Hypertable/Lib/RangeServerProtocol.h"
 
+#include "RequestHandlerAcknowledgeLoad.h"
 #include "RequestHandlerCompact.h"
 #include "RequestHandlerDestroyScanner.h"
 #include "RequestHandlerDump.h"
@@ -45,33 +45,27 @@ extern "C" {
 #include "RequestHandlerUpdate.h"
 #include "RequestHandlerCreateScanner.h"
 #include "RequestHandlerFetchScanblock.h"
+#include "RequestHandlerHeapcheck.h"
 #include "RequestHandlerDropTable.h"
+#include "RequestHandlerMetadataSync.h"
 #include "RequestHandlerStatus.h"
 #include "RequestHandlerReplayBegin.h"
 #include "RequestHandlerReplayLoadRange.h"
 #include "RequestHandlerReplayUpdate.h"
 #include "RequestHandlerReplayCommit.h"
 #include "RequestHandlerDropRange.h"
+#include "RequestHandlerRelinquishRange.h"
 #include "RequestHandlerClose.h"
 #include "RequestHandlerCommitLogSync.h"
+#include "RequestHandlerWaitForMaintenance.h"
 
 #include "ConnectionHandler.h"
-#include "EventHandlerMasterConnection.h"
 #include "RangeServer.h"
 
 
 using namespace Hypertable;
 using namespace Serialization;
 using namespace Error;
-
-/**
- *
- */
-ConnectionHandler::ConnectionHandler(Comm *comm, ApplicationQueuePtr &app_queue,
-    RangeServerPtr range_server, MasterClientPtr &master_client)
-  : m_comm(comm), m_app_queue_ptr(app_queue), m_range_server_ptr(range_server),
-    m_master_client_ptr(master_client), m_shutdown(false) {
-}
 
 /**
  *
@@ -110,6 +104,10 @@ void ConnectionHandler::handle(EventPtr &event) {
                   (Llu)event->header.command);
 
       switch (event->header.command) {
+      case RangeServerProtocol::COMMAND_ACKNOWLEDGE_LOAD:
+        handler = new RequestHandlerAcknowledgeLoad(m_comm, m_range_server_ptr.get(),
+                                                    event);
+        break;
       case RangeServerProtocol::COMMAND_COMPACT:
         handler = new RequestHandlerCompact(m_comm, m_range_server_ptr.get(),
                                             event);
@@ -158,6 +156,12 @@ void ConnectionHandler::handle(EventPtr &event) {
         handler = new RequestHandlerDropRange(m_comm, m_range_server_ptr.get(),
                                               event);
         break;
+
+      case RangeServerProtocol::COMMAND_RELINQUISH_RANGE:
+        handler = new RequestHandlerRelinquishRange(m_comm, m_range_server_ptr.get(),
+                                                    event);
+        break;
+        
       case RangeServerProtocol::COMMAND_STATUS:
         handler = new RequestHandlerStatus(m_comm, m_range_server_ptr.get(),
                                            event);
@@ -166,6 +170,9 @@ void ConnectionHandler::handle(EventPtr &event) {
         m_shutdown = true;
         handler = new RequestHandlerClose(m_comm, m_range_server_ptr.get(),
                                              event);
+        break;
+      case RangeServerProtocol::COMMAND_WAIT_FOR_MAINTENANCE:
+        handler = new RequestHandlerWaitForMaintenance(m_comm, m_range_server_ptr.get(), event);
         break;
       case RangeServerProtocol::COMMAND_SHUTDOWN:
         HT_INFO("Received shutdown command");
@@ -186,9 +193,18 @@ void ConnectionHandler::handle(EventPtr &event) {
         handler = new RequestHandlerUpdateSchema(m_comm,
             m_range_server_ptr.get(), event);
         break;
+      case RangeServerProtocol::COMMAND_HEAPCHECK:
+        handler = new RequestHandlerHeapcheck(m_comm, m_range_server_ptr.get(),
+                                              event);
+        break;
       case RangeServerProtocol::COMMAND_COMMIT_LOG_SYNC:
         handler = new RequestHandlerCommitLogSync(m_comm, m_range_server_ptr.get(), event);
         break;
+      case RangeServerProtocol::COMMAND_METADATA_SYNC:
+        handler = new RequestHandlerMetadataSync(m_comm, m_range_server_ptr.get(),
+                                                 event);
+        break;
+
       default:
         HT_THROWF(PROTOCOL_ERROR, "Unimplemented command (%llu)",
                   (Llu)event->header.command);
@@ -201,17 +217,6 @@ void ConnectionHandler::handle(EventPtr &event) {
       std::string errmsg = format("%s - %s", e.what(), get_text(e.code()));
       cb.error(Error::PROTOCOL_ERROR, errmsg);
     }
-  }
-  else if (event->type == Event::CONNECTION_ESTABLISHED) {
-
-    HT_INFOF("%s", event->to_str().c_str());
-
-    /**
-     * If this is the connection to the Master, then we need to register
-     * ourselves with the master
-     */
-    if (m_master_client_ptr)
-      m_app_queue_ptr->add(new EventHandlerMasterConnection(m_master_client_ptr, event));
   }
   else {
     HT_INFOF("%s", event->to_str().c_str());

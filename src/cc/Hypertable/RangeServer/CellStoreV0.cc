@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -99,13 +99,13 @@ const char *CellStoreV0::get_split_row() {
 }
 
 CellListScanner *CellStoreV0::create_scanner(ScanContextPtr &scan_ctx) {
-  return new CellStoreScanner<CellStoreBlockIndexMap<uint32_t> >(this, scan_ctx, &m_index_map32);
+  return new CellStoreScanner<CellStoreBlockIndexArray<uint32_t> >(this, scan_ctx, &m_index_map32);
 }
 
 
 void
 CellStoreV0::create(const char *fname, size_t max_entries,
-                    PropertiesPtr &props) {
+                    PropertiesPtr &props, const TableIdentifier *table_id) {
   uint32_t blocksize = props->get("blocksize", uint32_t(0));
   String compressor = props->get("compressor", String());
 
@@ -635,7 +635,7 @@ void CellStoreV0::display_block_info() {
   uint32_t last_offset = 0;
   uint32_t block_size;
   size_t i=0;
-  for (CellStoreBlockIndexMap<uint32_t>::iterator iter = m_index_map32.begin();
+  for (CellStoreBlockIndexArray<uint32_t>::iterator iter = m_index_map32.begin();
        iter != m_index_map32.end(); ++iter) {
     if (last_key) {
       block_size = iter.value() - last_offset;

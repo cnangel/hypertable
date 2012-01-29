@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2010 Doug Judd (Hypertable, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -113,14 +113,14 @@ CellListScanner *CellStoreV3::create_scanner(ScanContextPtr &scan_ctx) {
   }
 
   if (m_64bit_index)
-    return new CellStoreScanner<CellStoreBlockIndexMap<int64_t> >(this, scan_ctx, need_index ? &m_index_map64 : 0);
-  return new CellStoreScanner<CellStoreBlockIndexMap<uint32_t> >(this, scan_ctx, need_index ? &m_index_map32 : 0);
+    return new CellStoreScanner<CellStoreBlockIndexArray<int64_t> >(this, scan_ctx, need_index ? &m_index_map64 : 0);
+  return new CellStoreScanner<CellStoreBlockIndexArray<uint32_t> >(this, scan_ctx, need_index ? &m_index_map32 : 0);
 }
 
 
 void
 CellStoreV3::create(const char *fname, size_t max_entries,
-                    PropertiesPtr &props) {
+                    PropertiesPtr &props, const TableIdentifier *table_id) {
   int32_t replication = props->get_i32("replication", int32_t(-1));
   int64_t blocksize = props->get("blocksize", uint32_t(0));
   String compressor = props->get("compressor", String());
@@ -271,7 +271,7 @@ void CellStoreV3::load_bloom_filter() {
   amount = (m_file_length - m_trailer.size()) - m_trailer.filter_offset;
 
   HT_ASSERT(amount == m_bloom_filter->size());
-  
+
   if (amount > 0) {
     len = m_filesys->pread(m_fd, m_bloom_filter->ptr(), amount,
                            m_trailer.filter_offset);
@@ -280,6 +280,9 @@ void CellStoreV3::load_bloom_filter() {
       HT_THROWF(Error::DFSBROKER_IO_ERROR, "Problem loading bloomfilter for"
                 "CellStore '%s' : tried to read %lld but only got %lld",
                 m_filename.c_str(), (Lld)amount, (Lld)len);
+
+    m_bytes_read += len;
+
   }
 
   m_index_stats.bloom_filter_memory = m_bloom_filter->size();
@@ -369,7 +372,7 @@ void CellStoreV3::add(const Key &key, const ByteString value) {
   }
 
   m_key_compressor->add(key);
-  
+
   size_t key_len = m_key_compressor->length();
   size_t value_len = value.length();
 
@@ -718,6 +721,8 @@ void CellStoreV3::load_block_index() {
     buf.ptr += (m_trailer.var_index_offset - m_trailer.fix_index_offset);
     m_compressor->inflate(buf, m_index_builder.fixed_buf(), header);
 
+    m_bytes_read += m_index_builder.fixed_buf().fill();
+
     inflating_fixed = false;
 
     if (!header.check_magic(INDEX_FIXED_BLOCK_MAGIC))
@@ -730,6 +735,8 @@ void CellStoreV3::load_block_index() {
     vbuf.ptr = buf.ptr + amount;
 
     m_compressor->inflate(vbuf, m_index_builder.variable_buf(), header);
+
+    m_bytes_read += m_index_builder.variable_buf().fill();
 
     if (!header.check_magic(INDEX_VARIABLE_BLOCK_MAGIC))
       HT_THROW(Error::BLOCK_COMPRESSOR_BAD_MAGIC, m_filename);

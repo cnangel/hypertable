@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -77,11 +77,14 @@ namespace Hypertable {
 
     bool empty() { return m_fragment_queue.empty(); }
 
+    std::set<int64_t> &get_linked_log_set() { return m_linked_logs; }
+
   protected:
-    String           m_log_dir;
-    String           m_log_name;
-    LogFragmentQueue m_fragment_queue;
-    int64_t          m_latest_revision;
+    String            m_log_dir;
+    String            m_log_name;
+    LogFragmentQueue  m_fragment_queue;
+    int64_t           m_latest_revision;
+    std::set<int64_t> m_linked_logs;
   };
 
   typedef intrusive_ptr<CommitLogBase> CommitLogBasePtr;

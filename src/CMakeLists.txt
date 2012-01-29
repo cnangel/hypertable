@@ -1,6 +1,8 @@
 # CMake file for hypertable source
 
 add_subdirectory(cc/Common)
+add_subdirectory(cc/HyperAppHelper)
+add_subdirectory(cc/ThirdParty)
 add_subdirectory(cc/AsyncComm)
 add_subdirectory(cc/Hyperspace)
 add_subdirectory(cc/Hypertable/Master)
@@ -28,4 +30,8 @@ endif ()
 
 if (Ceph_FOUND)
    add_subdirectory(cc/DfsBroker/ceph)
+endif ()
+
+if (Mapr_FOUND)
+   add_subdirectory(cc/DfsBroker/mapr)
 endif ()

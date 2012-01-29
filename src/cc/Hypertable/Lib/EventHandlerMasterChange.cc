@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -20,10 +20,6 @@
  */
 
 #include "Common/Compat.h"
-extern "C" {
-#include <poll.h>
-}
-
 #include "Common/Error.h"
 #include "Common/Logger.h"
 #include "Common/System.h"
@@ -37,8 +33,6 @@ using namespace Hypertable;
  *
  */
 void EventHandlerMasterChange::run() {
-
-  poll(0, 0, System::rand32() % 3000);  // Randomly wait between 0 and 3 seconds
 
   try {
     m_master_client->reload_master();

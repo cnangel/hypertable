@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -31,11 +31,13 @@
 #include "AsyncComm/DispatchHandler.h"
 
 #include "Common/ReferenceCount.h"
+#include "Common/StatsSystem.h"
 #include "Common/Timer.h"
 
 #include "Hyperspace/HandleCallback.h"
 #include "Hyperspace/Session.h"
 
+#include "Hypertable/Lib/BalancePlan.h"
 #include "Hypertable/Lib/Types.h"
 
 
@@ -64,9 +66,11 @@ namespace Hypertable {
     MasterClient(ConnectionManagerPtr &, Hyperspace::SessionPtr &,
                  const String &toplevel_dir, uint32_t timeout_ms,
                  ApplicationQueuePtr &);
+    MasterClient(ConnectionManagerPtr &, InetAddr &addr, uint32_t timeout_ms);
+    MasterClient(Comm *comm, InetAddr &addr, uint32_t timeout_ms);
     ~MasterClient();
 
-    void initiate_connection(DispatchHandlerPtr dhp);
+    void initiate_connection(DispatchHandlerPtr dhp=0, ConnectionInitializerPtr init=0);
 
     bool wait_for_connection(uint32_t max_wait_ms);
     bool wait_for_connection(Timer &timer);
@@ -97,24 +101,28 @@ namespace Hypertable {
 
     void status(Timer *timer=0);
 
-    void register_server(std::string &location, const InetAddr &addr,
-                         DispatchHandler *handler, Timer *timer = 0);
-    void register_server(std::string &location, const InetAddr &addr,
-                         Timer *timer=0);
+    void move_range(TableIdentifier *table, RangeSpec &range,
+                    const String &log_dir, uint64_t soft_limit,
+                    bool split, DispatchHandler *handler, Timer *timer = 0);
+    void move_range(TableIdentifier *table, RangeSpec &range,
+                    const String &log_dir, uint64_t soft_limit,
+                    bool split, Timer *timer=0);
 
-    void report_split(TableIdentifier *table, RangeSpec &range,
-                      const String &log_dir, uint64_t soft_limit,
-                      DispatchHandler *handler, Timer *timer = 0);
-    void report_split(TableIdentifier *table, RangeSpec &range,
-                      const String &log_dir, uint64_t soft_limit, Timer *timer=0);
+    void relinquish_acknowledge(TableIdentifier *table, RangeSpec &range,
+                                DispatchHandler *handler, Timer *timer = 0);
+    void relinquish_acknowledge(TableIdentifier *table, RangeSpec &range,
+                                Timer *timer=0);
 
     void drop_table(const String &table_name, bool if_exists,
                     DispatchHandler *handler, Timer *timer=0);
     void drop_table(const String &table_name, bool if_exists, Timer *timer=0);
 
-    void close(Timer *timer=0);
-
     void shutdown(Timer *timer=0);
+
+    void balance(BalancePlan &plan, DispatchHandler *handler,
+                 Timer *timer = 0);
+
+    void balance(BalancePlan &plan, Timer *timer = 0);
 
     void reload_master();
 
@@ -125,27 +133,32 @@ namespace Hypertable {
 
     void hyperspace_disconnected();
     void hyperspace_reconnected();
-    void send_message(CommBufPtr &cbp, DispatchHandler *handler, Timer *timer);
+    void send_message_async(CommBufPtr &cbp, DispatchHandler *handler, Timer *timer, const String &label);
+    bool send_message(CommBufPtr &cbp, Timer *timer, EventPtr &event, const String &label);
+    void fetch_result(int64_t id, Timer *timer, EventPtr &event, const String &label);
     void initialize_hyperspace();
+    void initialize(Timer *&timer, Timer &tmp_timer);
 
     Mutex                  m_mutex;
     boost::condition       m_cond;
     bool                   m_verbose;
     Comm                  *m_comm;
-    ConnectionManagerPtr   m_conn_manager_ptr;
+    ConnectionManagerPtr   m_conn_manager;
     Hyperspace::SessionPtr m_hyperspace;
-    ApplicationQueuePtr    m_app_queue_ptr;
+    ApplicationQueuePtr    m_app_queue;
     uint64_t               m_master_file_handle;
-    Hyperspace::HandleCallbackPtr m_master_file_callback_ptr;
+    Hyperspace::HandleCallbackPtr m_master_file_callback;
     InetAddr               m_master_addr;
     String                 m_master_addr_string;
-    DispatchHandlerPtr     m_dispatcher_handler_ptr;
+    DispatchHandlerPtr     m_dispatcher_handler;
+    ConnectionInitializerPtr m_connection_initializer;
     bool                   m_hyperspace_init;
     bool                   m_hyperspace_connected;
     Mutex                  m_hyperspace_mutex;
     uint32_t               m_timeout_ms;
     MasterClientHyperspaceSessionCallback m_hyperspace_session_callback;
     String                 m_toplevel_dir;
+    uint32_t               m_retry_interval;
   };
 
   typedef intrusive_ptr<MasterClient> MasterClientPtr;

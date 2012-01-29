@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -49,12 +49,16 @@
 #include "Common/Logger.h"
 #include "Common/Time.h"
 
+#include "HyperAppHelper/Unique.h"
+
+#include "BalancePlan.h"
 #include "Key.h"
 #include "Cells.h"
 #include "Schema.h"
 #include "ScanSpec.h"
 #include "LoadDataFlags.h"
 #include "LoadDataSource.h"
+#include "RangeServerProtocol.h"
 
 namespace Hypertable {
   namespace Hql {
@@ -79,6 +83,7 @@ namespace Hypertable {
       COMMAND_FETCH_SCANBLOCK,
       COMMAND_LOAD_RANGE,
       COMMAND_SHUTDOWN,
+      COMMAND_SHUTDOWN_MASTER,
       COMMAND_UPDATE,
       COMMAND_REPLAY_BEGIN,
       COMMAND_REPLAY_LOAD_RANGE,
@@ -93,6 +98,11 @@ namespace Hypertable {
       COMMAND_CREATE_NAMESPACE,
       COMMAND_DROP_NAMESPACE,
       COMMAND_RENAME_TABLE,
+      COMMAND_WAIT_FOR_MAINTENANCE,
+      COMMAND_BALANCE,
+      COMMAND_HEAPCHECK,
+      COMMAND_COMPACT,
+      COMMAND_METADATA_SYNC,
       COMMAND_MAX
     };
 
@@ -119,17 +129,24 @@ namespace Hypertable {
 
     class InsertRecord {
     public:
-      InsertRecord() : timestamp(AUTO_ASSIGN) { }
+      InsertRecord() 
+        : timestamp(AUTO_ASSIGN), row_key_is_call(false), value_is_call(false) 
+      { }
+
       void clear() {
         timestamp = AUTO_ASSIGN;
         row_key.clear();
         column_key.clear();
         value.clear();
+        row_key_is_call=false;
+        value_is_call=false;
       }
       ::int64_t timestamp;
       String row_key;
+      bool row_key_is_call;
       String column_key;
       String value;
+      bool value_is_call;
     };
 
     class RowInterval {
@@ -249,10 +266,12 @@ namespace Hypertable {
     class ParserState {
     public:
       ParserState() : command(0), group_commit_interval(0), table_blocksize(0),
-                      table_replication(-1), table_in_memory(false), max_versions(0),
-                      ttl(0), load_flags(0), cf(0), ag(0), nanoseconds(0),
+                      table_replication(-1), table_in_memory(false), 
+                      max_versions(0), time_order_desc(false), ttl(0), 
+                      load_flags(0), flags(0), cf(0), ag(0), nanoseconds(0),
                       decimal_seconds(0), delete_all_columns(false),
-                      delete_time(0), if_exists(false), tables_only(false), with_ids(false),
+                      delete_time(0), delete_version_time(0),
+                      if_exists(false), tables_only(false), with_ids(false),
                       replay(false), scanner_id(-1), row_uniquify_chars(0),
                       escape(true), nokeys(false) {
         memset(&tmval, 0, sizeof(tmval));
@@ -265,6 +284,8 @@ namespace Hypertable {
       String str;
       String output_file;
       String input_file;
+      String source;
+      String destination;
       int input_file_src;
       String header_file;
       int header_file_src;
@@ -274,10 +295,12 @@ namespace Hypertable {
       ::int32_t table_replication;
       bool table_in_memory;
       ::uint32_t max_versions;
+      bool time_order_desc;
       time_t   ttl;
-      std::vector<String> key_columns;
+      std::vector<String> columns;
       String timestamp_column;
       int load_flags;
+      uint32_t flags;
       Schema::ColumnFamily *cf;
       Schema::AccessGroup *ag;
       Schema::ColumnFamilyMap cf_map;
@@ -290,10 +313,12 @@ namespace Hypertable {
       ScanState scan;
       InsertRecord current_insert_value;
       CellsBuilder inserts;
+      BalancePlan balance_plan;
       std::vector<String> delete_columns;
       bool delete_all_columns;
       String delete_row;
       ::int64_t delete_time;
+      ::int64_t delete_version_time;
       bool if_exists;
       bool tables_only;
       bool with_ids;
@@ -306,6 +331,35 @@ namespace Hypertable {
       bool nokeys;
       String current_rename_column_old_name;
       String current_column_family;
+
+      void validate_function(const String &s) {
+        if (s=="guid")
+          return;
+        HT_THROW(Error::HQL_PARSE_ERROR, String("Unknown function "
+                "identifier '") + s + "()'");
+      }
+
+      void execute_all_functions(InsertRecord &rec) {
+        if (rec.row_key_is_call) {
+          execute_function(rec.row_key);
+          rec.row_key_is_call=false;
+        }
+                
+        if (rec.value_is_call) {
+          execute_function(rec.value);
+          rec.value_is_call=false;
+        }
+      }
+
+      void execute_function(std::string &s) {
+        if (s=="guid") {
+          s=HyperAppHelper::generate_guid();
+          return;
+        }
+
+        HT_THROW(Error::HQL_PARSE_ERROR, String("Unknown function "
+                "identifier '") + s + "()'");
+      }
     };
 
     struct set_command {
@@ -368,6 +422,55 @@ namespace Hypertable {
       void operator()(char const *str, char const *end) const {
         state.range_end_row = String(str, end-str);
         trim_if(state.range_end_row, is_any_of("'\""));
+      }
+      ParserState &state;
+    };
+
+    struct set_source {
+      set_source(ParserState &state) : state(state) { }
+      void operator()(char const *str, char const *end) const {
+        state.source = String(str, end-str);
+        trim_if(state.source, is_any_of("'\""));
+      }
+      ParserState &state;
+    };
+
+    struct set_destination {
+      set_destination(ParserState &state) : state(state) { }
+      void operator()(char const *str, char const *end) const {
+        state.destination = String(str, end-str);
+        trim_if(state.destination, is_any_of("'\""));
+      }
+      ParserState &state;
+    };
+
+    struct set_balance_algorithm {
+      set_balance_algorithm(ParserState &state) : state(state) { }
+      void operator()(char const *str, char const *end) const {
+        state.balance_plan.algorithm = String(str, end-str);
+        trim_if(state.balance_plan.algorithm, is_any_of("'\""));
+      }
+      ParserState &state;
+    };
+
+    struct add_range_move_spec {
+      add_range_move_spec(ParserState &state) : state(state) { }
+      void operator()(char const *str, char const *end) const {
+        RangeMoveSpecPtr move_spec = new RangeMoveSpec();
+        move_spec->table.set_id(state.table_name);
+        move_spec->range.set_start_row(state.range_start_row);
+        move_spec->range.set_end_row(state.range_end_row);
+        move_spec->source_location = state.source;
+        move_spec->dest_location = state.destination;
+        state.balance_plan.moves.push_back(move_spec);
+      }
+      ParserState &state;
+    };
+
+    struct balance_set_duration {
+      balance_set_duration(ParserState &state) : state(state) { }
+      void operator()(size_t duration) const {
+        state.balance_plan.duration_millis = 1000*duration;
       }
       ParserState &state;
     };
@@ -483,6 +586,23 @@ namespace Hypertable {
           state.max_versions = (::uint32_t)strtol(str, 0, 10);
         else
           state.cf->max_versions = (::uint32_t)strtol(str, 0, 10);
+      }
+      ParserState &state;
+    };
+
+    struct set_time_order {
+      set_time_order(ParserState &state) : state(state) { }
+      void operator()(const char *str, const char *end) const {
+        if (state.cf->time_order_desc_set)
+          HT_THROW(Error::HQL_PARSE_ERROR,
+                   "SELECT TIME_ORDER predicate multiply defined.");
+        String val = String(str, end-str);
+        to_lower(val);
+        if (val == "desc")
+          state.cf->time_order_desc=true;
+        else
+          state.cf->time_order_desc=false;
+        state.cf->time_order_desc_set=true;
       }
       ParserState &state;
     };
@@ -805,12 +925,12 @@ namespace Hypertable {
       ParserState &state;
     };
 
-    struct add_row_key_column {
-      add_row_key_column(ParserState &state) : state(state) { }
+    struct add_column {
+      add_column(ParserState &state) : state(state) { }
       void operator()(char const *str, char const *end) const {
         String column(str, end-str);
         trim_if(column, is_any_of("'\""));
-        state.key_columns.push_back(column);
+        state.columns.push_back(column);
       }
       ParserState &state;
     };
@@ -1068,6 +1188,47 @@ namespace Hypertable {
           HT_THROW(Error::HQL_PARSE_ERROR,
                    "SELECT CELL_LIMIT predicate multiply defined.");
         state.scan.builder.set_cell_limit(ival);
+      }
+      ParserState &state;
+    };
+
+    struct scan_set_cell_limit_per_family {
+      scan_set_cell_limit_per_family(ParserState &state) : state(state) { }
+      void operator()(int ival) const {
+        if (state.scan.builder.get().cell_limit_per_family != 0)
+          HT_THROW(Error::HQL_PARSE_ERROR,
+                   "SELECT CELL_LIMIT_PER_FAMILY predicate multiply defined.");
+        state.scan.builder.set_cell_limit_per_family(ival);
+      }
+      ParserState &state;
+    };
+
+    struct scan_set_row_offset {
+      scan_set_row_offset(ParserState &state) : state(state) { }
+      void operator()(int ival) const {
+        if (state.scan.builder.get().row_offset != 0)
+          HT_THROW(Error::HQL_PARSE_ERROR,
+                   "SELECT OFFSET predicate multiply defined.");
+        if (state.scan.builder.get().cell_offset != 0)
+          HT_THROW(Error::HQL_PARSE_ERROR,
+                   "SELECT OFFSET predicate not allowed in combination with "
+                   "CELL_OFFSET.");
+        state.scan.builder.set_row_offset(ival);
+      }
+      ParserState &state;
+    };
+
+    struct scan_set_cell_offset {
+      scan_set_cell_offset(ParserState &state) : state(state) { }
+      void operator()(int ival) const {
+        if (state.scan.builder.get().cell_offset != 0)
+          HT_THROW(Error::HQL_PARSE_ERROR,
+                   "SELECT CELL_OFFSET predicate multiply defined.");
+        if (state.scan.builder.get().row_offset != 0)
+          HT_THROW(Error::HQL_PARSE_ERROR,
+                   "SELECT OFFSET predicate not allowed in combination with "
+                   "OFFSET.");
+        state.scan.builder.set_cell_offset(ival);
       }
       ParserState &state;
     };
@@ -1337,6 +1498,14 @@ namespace Hypertable {
       ParserState &state;
     };
 
+    struct scan_set_scan_and_filter_rows {
+      scan_set_scan_and_filter_rows(ParserState &state) : state(state) { }
+      void operator()(char const *str, char const *end) const {
+        state.scan.builder.set_scan_and_filter_rows(true);
+      }
+      ParserState &state;
+    };
+
     struct set_noescape {
       set_noescape(ParserState &state) : state(state) { }
       void operator()(char const *str, char const *end) const {
@@ -1381,6 +1550,16 @@ namespace Hypertable {
       ParserState &state;
     };
 
+    struct set_insert_rowkey_call {
+      set_insert_rowkey_call(ParserState &state) : state(state) { }
+      void operator()(char const *str, char const *end) const {
+        to_lower(state.current_insert_value.row_key);
+        state.validate_function(state.current_insert_value.row_key);
+        state.current_insert_value.row_key_is_call = true;
+      }
+      ParserState &state;
+    };
+
     struct set_insert_columnkey {
       set_insert_columnkey(ParserState &state) : state(state) { }
       void operator()(char const *str, char const *end) const {
@@ -1399,12 +1578,24 @@ namespace Hypertable {
       ParserState &state;
     };
 
+    struct set_insert_value_call {
+      set_insert_value_call(ParserState &state) : state(state) { }
+      void operator()(char const *str, char const *end) const {
+        to_lower(state.current_insert_value.value);
+        state.validate_function(state.current_insert_value.value);
+        state.current_insert_value.value_is_call = true;
+      }
+      ParserState &state;
+    };
+
     struct add_insert_value {
       add_insert_value(ParserState &state) : state(state) { }
       void operator()(char const *str, char const *end) const {
         const InsertRecord &rec = state.current_insert_value;
         char *cq;
         Cell cell;
+
+        state.execute_all_functions(state.current_insert_value);
 
         cell.row_key = rec.row_key.c_str();
         cell.column_family = rec.column_key.c_str();
@@ -1461,6 +1652,22 @@ namespace Hypertable {
       ParserState &state;
     };
 
+    struct set_delete_version_timestamp {
+      set_delete_version_timestamp(ParserState &state) : state(state) { }
+      void operator()(char const *str, char const *end) const {
+        time_t t = timegm(&state.tmval);
+        if (t == (time_t)-1)
+          HT_THROW(Error::HQL_PARSE_ERROR, String("DELETE invalid timestamp."));
+        state.delete_version_time = (::int64_t)t * 1000000000LL +
+            (::int64_t)(state.decimal_seconds * ((double) 1000000000LL)) + state.nanoseconds;
+        memset(&state.tmval, 0, sizeof(state.tmval));
+        state.nanoseconds = 0;
+        state.decimal_seconds = 0;
+      }
+      ParserState &state;
+    };
+
+
     struct set_scanner_id {
       set_scanner_id(ParserState &state) : state(state) { }
       void operator()(char const *str, char const *end) const {
@@ -1477,6 +1684,29 @@ namespace Hypertable {
       ParserState &state;
     };
 
+    struct set_flags_range_type {
+      set_flags_range_type(ParserState &state) : state(state) { }
+      void operator()(char const *str, char const *end) const {
+        String range_type_str = String(str, end-str);
+        trim_if(range_type_str, is_any_of("'\""));
+        to_lower(range_type_str);
+        if (range_type_str == "all")
+          state.flags |= RangeServerProtocol::COMPACT_FLAG_ALL;
+        else if (range_type_str == "root")
+          state.flags |= RangeServerProtocol::COMPACT_FLAG_ROOT;
+        else if (range_type_str == "metadata")
+          state.flags |= RangeServerProtocol::COMPACT_FLAG_METADATA;
+        else if (range_type_str == "system")
+          state.flags |= RangeServerProtocol::COMPACT_FLAG_SYSTEM;
+        else if (range_type_str == "user")
+          state.flags |= RangeServerProtocol::COMPACT_FLAG_USER;
+        else
+          HT_THROW(Error::HQL_PARSE_ERROR,
+                   format("Invalid range type specifier:  %s", range_type_str.c_str()));
+
+      }
+      ParserState &state;
+    };
 
     struct Parser : grammar<Parser> {
       Parser(ParserState &state) : state(state) { }
@@ -1489,7 +1719,8 @@ namespace Hypertable {
             "from", "FROM", "From", "start_time", "START_TIME", "Start_Time",
             "Start_time", "end_time", "END_TIME", "End_Time", "End_time",
             "into", "INTO", "Into", "table", "TABLE", "Table", "NAMESPACE", "Namespace",
-            "cells", "CELLS", "value", "VALUE", "regexp", "REGEXP";
+            "cells", "CELLS", "value", "VALUE", "regexp", "REGEXP", "wait", "WAIT"
+            "for", "FOR", "maintenance", "MAINTENANCE";
 
           /**
            * OPERATORS
@@ -1521,6 +1752,7 @@ namespace Hypertable {
           chlit<>     DOT('.');
           strlit<>    DOTDOT("..");
           strlit<>    DOUBLEQUESTIONMARK("??");
+          chlit<>     PIPE('|');
 
           /**
            * TOKENS
@@ -1529,10 +1761,13 @@ namespace Hypertable {
 
           Token CREATE       = as_lower_d["create"];
           Token DROP         = as_lower_d["drop"];
+          Token BALANCE      = as_lower_d["balance"];
+          Token DURATION     = as_lower_d["duration"];
           Token ADD          = as_lower_d["add"];
           Token USE          = as_lower_d["use"];
           Token RENAME       = as_lower_d["rename"];
           Token COLUMN       = as_lower_d["column"];
+          Token COLUMNS      = as_lower_d["columns"];
           Token FAMILY       = as_lower_d["family"];
           Token ALTER        = as_lower_d["alter"];
           Token HELP         = as_lower_d["help"];
@@ -1589,12 +1824,19 @@ namespace Hypertable {
           Token REVS         = as_lower_d["revs"];
           Token LIMIT        = as_lower_d["limit"];
           Token CELL_LIMIT   = as_lower_d["cell_limit"];
+          Token CELL_LIMIT_PER_FAMILY   = as_lower_d["cell_limit_per_family"];
+          Token OFFSET       = as_lower_d["offset"];
+          Token CELL_OFFSET  = as_lower_d["cell_offset"];
           Token INTO         = as_lower_d["into"];
           Token FILE         = as_lower_d["file"];
           Token LOAD         = as_lower_d["load"];
           Token DATA         = as_lower_d["data"];
           Token INFILE       = as_lower_d["infile"];
           Token TIMESTAMP    = as_lower_d["timestamp"];
+          Token TIME_ORDER   = as_lower_d["time_order"];
+          Token ASC          = as_lower_d["asc"];
+          Token DESC         = as_lower_d["desc"];
+          Token VERSION      = as_lower_d["version"];
           Token INSERT       = as_lower_d["insert"];
           Token DELETE       = as_lower_d["delete"];
           Token VALUE        = as_lower_d["value"];
@@ -1609,6 +1851,7 @@ namespace Hypertable {
           Token EXISTS       = as_lower_d["exists"];
           Token DISPLAY_TIMESTAMPS = as_lower_d["display_timestamps"];
           Token RETURN_DELETES = as_lower_d["return_deletes"];
+          Token SCAN_AND_FILTER_ROWS = as_lower_d["scan_and_filter_rows"];
           Token KEYS_ONLY    = as_lower_d["keys_only"];
           Token RANGE        = as_lower_d["range"];
           Token UPDATE       = as_lower_d["update"];
@@ -1619,6 +1862,7 @@ namespace Hypertable {
           Token SCANBLOCK    = as_lower_d["scanblock"];
           Token CLOSE        = as_lower_d["close"];
           Token SHUTDOWN     = as_lower_d["shutdown"];
+          Token MASTER       = as_lower_d["master"];
           Token REPLAY       = as_lower_d["replay"];
           Token START        = as_lower_d["start"];
           Token COMMIT       = as_lower_d["commit"];
@@ -1639,6 +1883,19 @@ namespace Hypertable {
           Token SINGLE_CELL_FORMAT = as_lower_d["single_cell_format"];
           Token BUCKETS      = as_lower_d["buckets"];
           Token REPLICATION  = as_lower_d["replication"];
+          Token WAIT         = as_lower_d["wait"];
+          Token FOR          = as_lower_d["for"];
+          Token MAINTENANCE  = as_lower_d["maintenance"];
+          Token HEAPCHECK    = as_lower_d["heapcheck"];
+          Token ALGORITHM    = as_lower_d["algorithm"];
+          Token COMPACT      = as_lower_d["compact"];
+          Token ALL          = as_lower_d["all"];
+          Token ROOT         = as_lower_d["root"];
+          Token METADATA     = as_lower_d["metadata"];
+          Token SYSTEM       = as_lower_d["system"];
+          Token USER         = as_lower_d["user"];
+          Token RANGES       = as_lower_d["ranges"];
+          Token SYNC         = as_lower_d["sync"];
 
           /**
            * Start grammar definition
@@ -1653,6 +1910,10 @@ namespace Hypertable {
           string_literal
             = single_string_literal
             | double_string_literal
+            ;
+
+          parameter_list
+            = ch_p('(') >> ch_p(')')
             ;
 
           single_string_literal
@@ -1671,7 +1932,6 @@ namespace Hypertable {
 
           statement
             = select_statement[set_command(self.state, COMMAND_SELECT)]
-            | select_cells_statement[set_command(self.state, COMMAND_SELECT)]
             | use_namespace_statement[set_command(self.state,
                 COMMAND_USE_NAMESPACE)]
             | create_namespace_statement[set_command(self.state,
@@ -1704,6 +1964,7 @@ namespace Hypertable {
                 COMMAND_FETCH_SCANBLOCK)]
             | close_statement[set_command(self.state, COMMAND_CLOSE)]
             | shutdown_statement[set_command(self.state, COMMAND_SHUTDOWN)]
+            | shutdown_master_statement[set_command(self.state, COMMAND_SHUTDOWN_MASTER)]
             | drop_range_statement[set_command(self.state, COMMAND_DROP_RANGE)]
             | replay_start_statement[set_command(self.state,
                 COMMAND_REPLAY_BEGIN)]
@@ -1711,6 +1972,64 @@ namespace Hypertable {
             | replay_commit_statement[set_command(self.state,
                 COMMAND_REPLAY_COMMIT)]
             | exists_table_statement[set_command(self.state, COMMAND_EXISTS_TABLE)]
+            | wait_for_maintenance_statement[set_command(self.state, COMMAND_WAIT_FOR_MAINTENANCE)]
+            | balance_statement[set_command(self.state, COMMAND_BALANCE)]
+            | heapcheck_statement[set_command(self.state, COMMAND_HEAPCHECK)]
+            | compact_statement[set_command(self.state, COMMAND_COMPACT)]
+            | metadata_sync_statement[set_command(self.state, COMMAND_METADATA_SYNC)]
+            ;
+
+          metadata_sync_statement
+            = METADATA >> SYNC >> TABLE >> user_identifier[set_table_name(self.state)] >> *(metadata_sync_option_spec)
+            | METADATA >> SYNC >> RANGES
+                      >> (range_type[set_flags_range_type(self.state)]
+                          >> *(PIPE >> range_type[set_flags_range_type(self.state)])) >> *(metadata_sync_option_spec)
+            ;
+
+          metadata_sync_option_spec
+            =  COLUMNS >> identifier[add_column(self.state)] >> *(COMMA >> identifier[add_column(self.state)])
+            ;
+
+          compact_statement
+            = COMPACT >> TABLE >> user_identifier[set_table_name(self.state)]
+            | COMPACT >> RANGES
+                      >> (range_type[set_flags_range_type(self.state)]
+                          >> *(PIPE >> range_type[set_flags_range_type(self.state)]))
+            ;
+
+          range_type
+            = ALL
+            | ROOT
+            | METADATA
+            | SYSTEM
+            | USER
+            ;
+
+          heapcheck_statement
+            = HEAPCHECK >> *(string_literal[set_output_file(self.state)])
+            ;
+
+          balance_statement
+            = BALANCE >> !(ALGORITHM >> EQUAL >> user_identifier[set_balance_algorithm(self.state)])
+              >> *(range_move_spec_list)
+              >> *(balance_option_spec)
+            ;
+
+          range_move_spec_list
+            = range_move_spec[add_range_move_spec(self.state)] >> *(COMMA
+              >> range_move_spec[add_range_move_spec(self.state)])
+            ;
+
+          range_move_spec
+            = LPAREN
+            >> range_spec >> COMMA
+            >> string_literal[set_source(self.state)] >> COMMA
+            >> string_literal[set_destination(self.state)]
+            >> RPAREN
+            ;
+
+          balance_option_spec
+            = DURATION >> EQUAL >> uint_p[balance_set_duration(self.state)]
             ;
 
           drop_range_statement
@@ -1733,8 +2052,16 @@ namespace Hypertable {
             = CLOSE
             ;
 
+          wait_for_maintenance_statement
+            = WAIT >> FOR >> MAINTENANCE
+            ;
+
           shutdown_statement
             = SHUTDOWN
+            ;
+
+          shutdown_master_statement
+            = SHUTDOWN >> MASTER
             ;
 
           fetch_scanblock_statement
@@ -1768,16 +2095,17 @@ namespace Hypertable {
             ;
 
           dump_table_option_spec
-            = MAX_VERSIONS >> EQUAL >> uint_p[scan_set_max_versions(self.state)]
+            = MAX_VERSIONS >> *EQUAL >> uint_p[scan_set_max_versions(self.state)]
             | BUCKETS >> uint_p[scan_set_buckets(self.state)]
             | REVS >> !EQUAL >> uint_p[scan_set_max_versions(self.state)]
             | INTO >> FILE >> string_literal[scan_set_outfile(self.state)]
             ;
 
           dump_table_statement
-	    = DUMP >> TABLE >> user_identifier[set_table_name(self.state)]
-		   >> !(WHERE >> time_predicate)
-		   >> *(dump_table_option_spec)
+	          = DUMP >> TABLE >> user_identifier[set_table_name(self.state)]
+            >> !(COLUMNS >> ('*' | (column_predicate >> *(COMMA >> column_predicate))))
+		        >> !(dump_where_clause)
+		        >> *(dump_table_option_spec)
             ;
 
           range_spec
@@ -1819,8 +2147,8 @@ namespace Hypertable {
               >> FROM >> user_identifier[set_table_name(self.state)]
               >> WHERE >> ROW >> EQUAL >> string_literal[
                   delete_set_row(self.state)]
-              >> !(TIMESTAMP >> date_expression[
-                  set_delete_timestamp(self.state)])
+              >> !(TIMESTAMP >> date_expression[set_delete_timestamp(self.state)]
+                  | VERSION >> date_expression[set_delete_version_timestamp(self.state)])
             ;
 
           delete_column_clause
@@ -1843,14 +2171,26 @@ namespace Hypertable {
             =
               (
               LPAREN
-              >> string_literal[set_insert_rowkey(self.state)] >> COMMA
+              >> ( string_literal[set_insert_rowkey(self.state)] 
+                 | identifier[set_insert_rowkey(self.state)] >>
+                    parameter_list[set_insert_rowkey_call(self.state)] ) 
+                >> COMMA 
               >> string_literal[set_insert_columnkey(self.state)] >> COMMA
-              >> string_literal[set_insert_value (self.state)] >> RPAREN
+              >> ( string_literal[set_insert_value(self.state)] 
+                 | identifier[set_insert_value(self.state)] >>
+                    parameter_list[set_insert_value_call(self.state)] ) 
+                >> RPAREN
               | LPAREN
               >> date_expression[set_insert_timestamp(self.state)] >> COMMA
-              >> string_literal[set_insert_rowkey(self.state)] >> COMMA
+              >> ( string_literal[set_insert_rowkey(self.state)] 
+                 | identifier[set_insert_rowkey(self.state)] >>
+                    parameter_list[set_insert_rowkey_call(self.state)] ) 
+                >> COMMA 
               >> string_literal[set_insert_columnkey(self.state)] >> COMMA
-              >> string_literal[set_insert_value (self.state)] >> RPAREN
+              >> ( string_literal[set_insert_value(self.state)] 
+                 | identifier[set_insert_value(self.state)] >>
+                    parameter_list[set_insert_value_call(self.state)] ) 
+                >> RPAREN
               )
               ;
 
@@ -1870,8 +2210,8 @@ namespace Hypertable {
           create_table_statement
             = CREATE >> TABLE
               >> user_identifier[set_table_name(self.state)]
-              >> *(LIKE >> user_identifier[set_clone_table_name(self.state)])
-              >> !(create_definitions)
+              >> ((LIKE >> user_identifier[set_clone_table_name(self.state)])
+                  | (create_definitions))
               >> *(table_option)
             ;
 
@@ -1964,13 +2304,19 @@ namespace Hypertable {
 
           column_option
             = max_versions_option
+            | time_order_option
             | ttl_option
             | counter_option
             ;
 
           max_versions_option
-	           = (MAX_VERSIONS | REVS) >> !EQUAL
+	        = (MAX_VERSIONS | REVS) >> *EQUAL
               >> lexeme_d[(+digit_p)[set_max_versions(self.state)]]
+            ;
+
+          time_order_option
+            = TIME_ORDER >> ASC[set_time_order(self.state)]
+            | TIME_ORDER >> DESC[set_time_order(self.state)]
             ;
 
           ttl_option
@@ -2025,35 +2371,32 @@ namespace Hypertable {
             ;
 
           select_statement
-            = SELECT
+            = SELECT >> !(CELLS)
               >> ('*' | (column_predicate >> *(COMMA >> column_predicate)))
               >> FROM >> user_identifier[set_table_name(self.state)]
               >> !where_clause
               >> *(option_spec)
             ;
 
-          select_cells_statement
-            = SELECT >> CELLS
-              >> ('*' | (column_predicate >> *(COMMA >> column_predicate)))
-              >> FROM >> user_identifier[set_table_name(self.state)]
-              >> !where_cells_clause
-              >> *(option_spec)
-            ;
-
           column_predicate
-            = longest_d[(identifier[scan_add_column_family(self.state, NO_QUALIFIER)])
-            | (identifier[scan_add_column_family(self.state, EXACT_QUALIFIER)] >> COLON >>
-              user_identifier[scan_add_column_qualifier(self.state, EXACT_QUALIFIER)])
-            | (identifier[scan_add_column_family(self.state, REGEXP_QUALIFIER)] >> COLON >>
-              regexp_literal[scan_add_column_qualifier(self.state, REGEXP_QUALIFIER)])]
+            = longest_d[(identifier[scan_add_column_family(self.state, 
+                        NO_QUALIFIER)])
+            | (identifier[scan_add_column_family(self.state, 
+                        EXACT_QUALIFIER)] >> COLON >>
+                        user_identifier[scan_add_column_qualifier(self.state, 
+                            EXACT_QUALIFIER)])
+            | (identifier[scan_add_column_family(self.state, 
+                        REGEXP_QUALIFIER)] >> COLON >>
+                        regexp_literal[scan_add_column_qualifier(self.state, 
+                            REGEXP_QUALIFIER)])]
             ;
 
           where_clause
             = WHERE >> where_predicate >> *(AND >> where_predicate)
             ;
 
-          where_cells_clause
-            = WHERE >> where_cells_predicate >> *(AND >> where_cells_predicate)
+          dump_where_clause
+            = WHERE >> dump_where_predicate >> *(AND >> dump_where_predicate)
             ;
 
           relop
@@ -2104,28 +2447,46 @@ namespace Hypertable {
             = cell_predicate
             | row_predicate
             | time_predicate
+            | value_predicate
             ;
 
-          where_cells_predicate
-            = cell_predicate
-            | row_predicate
+          dump_where_predicate
+            = ROW >> REGEXP >> string_literal[scan_set_row_regexp(self.state)]
             | time_predicate
             | value_predicate
             ;
 
           option_spec
-            = MAX_VERSIONS >> EQUAL >> uint_p[scan_set_max_versions(self.state)]
+            = MAX_VERSIONS >> *EQUAL >> uint_p[scan_set_max_versions(self.state)]
             | REVS >> !EQUAL >> uint_p[scan_set_max_versions(self.state)]
             | LIMIT >> EQUAL >> uint_p[scan_set_row_limit(self.state)]
             | LIMIT >> uint_p[scan_set_row_limit(self.state)]
             | CELL_LIMIT >> EQUAL >> uint_p[scan_set_cell_limit(self.state)]
             | CELL_LIMIT >> uint_p[scan_set_cell_limit(self.state)]
+            | CELL_LIMIT_PER_FAMILY >> EQUAL >> uint_p[scan_set_cell_limit_per_family(self.state)]
+            | CELL_LIMIT_PER_FAMILY >> uint_p[scan_set_cell_limit_per_family(self.state)]
+            | OFFSET >> EQUAL >> uint_p[scan_set_row_offset(self.state)]
+            | OFFSET >> uint_p[scan_set_row_offset(self.state)]
+            | CELL_OFFSET >> EQUAL >> uint_p[scan_set_cell_offset(self.state)]
+            | CELL_OFFSET >> uint_p[scan_set_cell_offset(self.state)]
             | INTO >> FILE >> string_literal[scan_set_outfile(self.state)]
             | DISPLAY_TIMESTAMPS[scan_set_display_timestamps(self.state)]
             | RETURN_DELETES[scan_set_return_deletes(self.state)]
             | KEYS_ONLY[scan_set_keys_only(self.state)]
             | NOESCAPE[set_noescape(self.state)]
             | NO_ESCAPE[set_noescape(self.state)]
+            | SCAN_AND_FILTER_ROWS[scan_set_scan_and_filter_rows(self.state)]
+            ;
+
+          unused_tokens
+            = START_TIME
+            | END_TIME
+            | START_ROW
+            | END_ROW
+            | INCLUSIVE
+            | EXCLUSIVE
+            | STATS
+            | STARTS
             ;
 
           date_expression
@@ -2179,8 +2540,8 @@ namespace Hypertable {
 
           load_data_option
             = ROW_KEY_COLUMN >> EQUAL >> user_identifier[
-                add_row_key_column(self.state)] >> *(PLUS >> user_identifier[
-                add_row_key_column(self.state)])
+                add_column(self.state)] >> *(PLUS >> user_identifier[
+                add_column(self.state)])
             | TIMESTAMP_COLUMN >> EQUAL >> user_identifier[
                 set_timestamp_column(self.state)]
             | HEADER_FILE >> EQUAL >> string_literal[
@@ -2222,8 +2583,10 @@ namespace Hypertable {
           BOOST_SPIRIT_DEBUG_RULE(identifier);
           BOOST_SPIRIT_DEBUG_RULE(user_identifier);
           BOOST_SPIRIT_DEBUG_RULE(max_versions_option);
+          BOOST_SPIRIT_DEBUG_RULE(time_order_option);
           BOOST_SPIRIT_DEBUG_RULE(statement);
           BOOST_SPIRIT_DEBUG_RULE(string_literal);
+          BOOST_SPIRIT_DEBUG_RULE(parameter_list);
           BOOST_SPIRIT_DEBUG_RULE(single_string_literal);
           BOOST_SPIRIT_DEBUG_RULE(double_string_literal);
           BOOST_SPIRIT_DEBUG_RULE(regexp_literal);
@@ -2239,11 +2602,8 @@ namespace Hypertable {
           BOOST_SPIRIT_DEBUG_RULE(describe_table_statement);
           BOOST_SPIRIT_DEBUG_RULE(show_statement);
           BOOST_SPIRIT_DEBUG_RULE(select_statement);
-          BOOST_SPIRIT_DEBUG_RULE(select_cells_statement);
           BOOST_SPIRIT_DEBUG_RULE(where_clause);
-          BOOST_SPIRIT_DEBUG_RULE(where_cells_clause);
           BOOST_SPIRIT_DEBUG_RULE(where_predicate);
-          BOOST_SPIRIT_DEBUG_RULE(where_cells_predicate);
           BOOST_SPIRIT_DEBUG_RULE(time_predicate);
           BOOST_SPIRIT_DEBUG_RULE(cell_interval);
           BOOST_SPIRIT_DEBUG_RULE(cell_predicate);
@@ -2254,6 +2614,7 @@ namespace Hypertable {
           BOOST_SPIRIT_DEBUG_RULE(value_predicate);
           BOOST_SPIRIT_DEBUG_RULE(option_spec);
           BOOST_SPIRIT_DEBUG_RULE(date_expression);
+          BOOST_SPIRIT_DEBUG_RULE(unused_tokens);
           BOOST_SPIRIT_DEBUG_RULE(datetime);
           BOOST_SPIRIT_DEBUG_RULE(date);
           BOOST_SPIRIT_DEBUG_RULE(time);
@@ -2277,6 +2638,8 @@ namespace Hypertable {
           BOOST_SPIRIT_DEBUG_RULE(exists_table_statement);
           BOOST_SPIRIT_DEBUG_RULE(load_range_statement);
           BOOST_SPIRIT_DEBUG_RULE(dump_statement);
+          BOOST_SPIRIT_DEBUG_RULE(dump_where_clause);
+          BOOST_SPIRIT_DEBUG_RULE(dump_where_predicate);
           BOOST_SPIRIT_DEBUG_RULE(dump_table_option_spec);
           BOOST_SPIRIT_DEBUG_RULE(dump_table_statement);
           BOOST_SPIRIT_DEBUG_RULE(range_spec);
@@ -2286,10 +2649,20 @@ namespace Hypertable {
           BOOST_SPIRIT_DEBUG_RULE(fetch_scanblock_statement);
           BOOST_SPIRIT_DEBUG_RULE(close_statement);
           BOOST_SPIRIT_DEBUG_RULE(shutdown_statement);
+          BOOST_SPIRIT_DEBUG_RULE(shutdown_master_statement);
           BOOST_SPIRIT_DEBUG_RULE(drop_range_statement);
           BOOST_SPIRIT_DEBUG_RULE(replay_start_statement);
           BOOST_SPIRIT_DEBUG_RULE(replay_log_statement);
           BOOST_SPIRIT_DEBUG_RULE(replay_commit_statement);
+          BOOST_SPIRIT_DEBUG_RULE(balance_statement);
+          BOOST_SPIRIT_DEBUG_RULE(balance_option_spec);
+          BOOST_SPIRIT_DEBUG_RULE(range_move_spec_list);
+          BOOST_SPIRIT_DEBUG_RULE(range_move_spec);
+          BOOST_SPIRIT_DEBUG_RULE(heapcheck_statement);
+          BOOST_SPIRIT_DEBUG_RULE(compact_statement);
+          BOOST_SPIRIT_DEBUG_RULE(metadata_sync_statement);
+          BOOST_SPIRIT_DEBUG_RULE(metadata_sync_option_spec);
+          BOOST_SPIRIT_DEBUG_RULE(range_type);
 #endif
         }
 
@@ -2303,30 +2676,36 @@ namespace Hypertable {
           add_column_definition, add_column_definitions,
           drop_column_definition, drop_column_definitions,
           rename_column_definition, create_table_statement, duration,
-          create_namespace_statement, use_namespace_statement, drop_namespace_statement,
-          identifier, user_identifier, max_versions_option, statement,
-          single_string_literal, double_string_literal, string_literal, regexp_literal,
-          ttl_option, counter_option, access_group_definition, access_group_option,
+          create_namespace_statement, use_namespace_statement, 
+          drop_namespace_statement, identifier, user_identifier, 
+          max_versions_option, time_order_option, statement,
+          single_string_literal, double_string_literal, string_literal, 
+          parameter_list, regexp_literal, ttl_option, counter_option, 
+          access_group_definition, access_group_option,
           bloom_filter_option, in_memory_option,
           blocksize_option, replication_option, help_statement,
-          describe_table_statement, show_statement, select_statement, select_cells_statement,
-          where_clause, where_cells_clause, where_predicate, where_cells_predicate,
+          describe_table_statement, show_statement, select_statement,
+          where_clause, where_predicate,
           time_predicate, relop, row_interval, row_predicate, column_predicate,
           value_predicate,
-          option_spec, date_expression, datetime, date, time, year,
+          option_spec, date_expression, unused_tokens, datetime, date, time, year,
           load_data_statement, load_data_input, load_data_option, insert_statement,
           insert_value_list, insert_value, delete_statement,
           delete_column_clause, table_option, table_option_in_memory,
           table_option_blocksize, table_option_replication, get_listing_statement,
           drop_table_statement, alter_table_statement,rename_table_statement,
           load_range_statement,
-          dump_statement, dump_table_statement, dump_table_option_spec, range_spec,
-	        exists_table_statement, update_statement, create_scanner_statement,
+          dump_statement, dump_where_clause, dump_where_predicate,
+          dump_table_statement, dump_table_option_spec, range_spec,
+          exists_table_statement, update_statement, create_scanner_statement,
           destroy_scanner_statement, fetch_scanblock_statement,
-          close_statement, shutdown_statement, drop_range_statement,
-          replay_start_statement, replay_log_statement,
+          close_statement, shutdown_statement, shutdown_master_statement,
+          drop_range_statement, replay_start_statement, replay_log_statement,
           replay_commit_statement, cell_interval, cell_predicate,
-          cell_spec;
+          cell_spec, wait_for_maintenance_statement, move_range_statement,
+          balance_statement, range_move_spec_list, range_move_spec,
+          balance_option_spec, heapcheck_statement, compact_statement,
+          metadata_sync_statement, metadata_sync_option_spec, range_type;
       };
 
       ParserState &state;

@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -19,7 +19,8 @@
  * 02110-1301, USA.
  */
 
-#include "Common/Compat.h"
+
+#include "BlockCompressionCodecQuicklz.h"
 
 #include "Common/Checksum.h"
 #include "Common/Thread.h"
@@ -28,19 +29,12 @@
 #include "Common/Logger.h"
 #include "Common/String.h"
 
-#include "BlockCompressionCodecQuicklz.h"
-
-#include "quicklz/quicklz.h"
-
 using namespace Hypertable;
 
 /**
  *
  */
 BlockCompressionCodecQuicklz::BlockCompressionCodecQuicklz(const Args &args) {
-  size_t amount = ((QLZ_SCRATCH_DECOMPRESS) < (QLZ_SCRATCH_COMPRESS))
-      ? (QLZ_SCRATCH_COMPRESS) : (QLZ_SCRATCH_DECOMPRESS);
-  m_workmem = new uint8_t [amount];
 }
 
 
@@ -48,7 +42,6 @@ BlockCompressionCodecQuicklz::BlockCompressionCodecQuicklz(const Args &args) {
  *
  */
 BlockCompressionCodecQuicklz::~BlockCompressionCodecQuicklz() {
-  delete [] m_workmem;
 }
 
 
@@ -67,7 +60,7 @@ BlockCompressionCodecQuicklz::deflate(const DynamicBuffer &input,
 
   // compress
   len = qlz_compress((char *)input.base, (char *)output.base+header.length(),
-                     input.fill(), (char *)m_workmem);
+                     input.fill(), &m_compress);
 
   /* check for an incompressible block */
   if (len >= input.fill()) {
@@ -120,8 +113,8 @@ void BlockCompressionCodecQuicklz::inflate(const DynamicBuffer &input,
   else {
     size_t len;
     // decompress
-    len = qlz_decompress((char *)msg_ptr, (char *)output.base,
-                         (char *)m_workmem);
+    len = qlz_decompress((char *)msg_ptr, (char *)output.base, &m_decompress);
+
     HT_ASSERT(len == header.get_data_length());
   }
   output.ptr = output.base + header.get_data_length();

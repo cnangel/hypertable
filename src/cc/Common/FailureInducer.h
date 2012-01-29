@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -35,11 +35,14 @@ namespace Hypertable {
     static bool enabled() { return (bool)instance; }
     void parse_option(String option);
     void maybe_fail(const String &label);
+    void clear();
+
   private:
     struct failure_inducer_state {
       uint32_t iteration;
       uint32_t trigger_iteration;
       int failure_type;
+      int error_code;
     };
     typedef hash_map<String, failure_inducer_state *> StateMap;
     Mutex m_mutex;
@@ -57,7 +60,7 @@ namespace Hypertable {
   if (Hypertable::FailureInducer::enabled() && (_exp_)) { \
     Hypertable::FailureInducer::instance->maybe_fail(_label_); \
   }
-    
+
 
 
 #endif // HYPERTABLE_FAILUREINDUCER_H

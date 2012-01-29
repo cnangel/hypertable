@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -26,13 +26,15 @@ using namespace Hypertable;
 
 int
 ResponseCallbackFetchScanblock::response(short moreflag, int32_t id,
-                                         StaticBuffer &ext) {
+        StaticBuffer &ext) {
   CommHeader header;
   header.initialize_from_request_header(m_event_ptr->header);
-  CommBufPtr cbp(new CommBuf( header, 10, ext));
+  CommBufPtr cbp(new CommBuf( header, 18, ext));
   cbp->append_i32(Error::OK);
   cbp->append_i16(moreflag);
-  cbp->append_i32(id);   // scanner ID
+  cbp->append_i32(id);              // scanner ID
+  cbp->append_i32(0);               // skipped_rows
+  cbp->append_i32(0);               // skipped_cells
   return m_comm->send_response(m_event_ptr->addr, cbp);
 }
 

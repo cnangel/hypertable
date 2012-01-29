@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -60,51 +60,71 @@ IntervalScanner::IntervalScanner(Comm *comm, Table *table,
 void IntervalScanner::init(const ScanSpec &scan_spec, Timer &timer) {
   const char *start_row, *end_row;
   String family, qualifier;
-  bool is_regexp;
+  bool has_qualifier, is_regexp;
 
   if (!scan_spec.row_intervals.empty() && !scan_spec.cell_intervals.empty())
     HT_THROW(Error::BAD_SCAN_SPEC,
              "ROW predicates and CELL predicates can't be combined");
 
   m_range_server.set_default_timeout(m_timeout_ms);
+  m_rowset.clear();
 
   m_scan_spec_builder.clear();
   m_scan_spec_builder.set_row_limit(scan_spec.row_limit);
   m_scan_spec_builder.set_cell_limit(scan_spec.cell_limit);
+  m_scan_spec_builder.set_cell_limit_per_family(scan_spec.cell_limit_per_family);
   m_scan_spec_builder.set_max_versions(scan_spec.max_versions);
   m_scan_spec_builder.set_row_regexp(scan_spec.row_regexp);
   m_scan_spec_builder.set_value_regexp(scan_spec.value_regexp);
 
   for (size_t i=0; i<scan_spec.columns.size(); i++) {
-    ScanSpec::parse_column(scan_spec.columns[i], family, qualifier, &is_regexp);
+    ScanSpec::parse_column(scan_spec.columns[i], family, qualifier, &has_qualifier, &is_regexp);
     if (m_schema->get_column_family(family.c_str()) == 0)
       HT_THROW(Error::RANGESERVER_INVALID_COLUMNFAMILY,
       (String)"Table= " + m_table->get_name() + " , Column family=" + scan_spec.columns[i]);
     m_scan_spec_builder.add_column(scan_spec.columns[i]);
   }
 
-  HT_ASSERT(scan_spec.row_intervals.size() <= 1);
+  HT_ASSERT(scan_spec.row_intervals.size() <= 1 || scan_spec.scan_and_filter_rows);
 
   if (!scan_spec.row_intervals.empty()) {
-    start_row = (scan_spec.row_intervals[0].start == 0) ? ""
-        : scan_spec.row_intervals[0].start;
-    if (scan_spec.row_intervals[0].end == 0 ||
-        scan_spec.row_intervals[0].end[0] == 0)
-      end_row = Key::END_ROW_MARKER;
-    else
-      end_row = scan_spec.row_intervals[0].end;
-    int cmpval = strcmp(start_row, end_row);
-    if (cmpval > 0)
-      HT_THROW(Error::BAD_SCAN_SPEC, format("start_row (%s) > end_row (%s)", start_row, end_row));
-    if (cmpval == 0 && !scan_spec.row_intervals[0].start_inclusive
-        && !scan_spec.row_intervals[0].end_inclusive)
-      HT_THROW(Error::BAD_SCAN_SPEC, "empty row interval");
-    m_start_row = start_row;
-    m_end_row = end_row;
-    m_end_inclusive = scan_spec.row_intervals[0].end_inclusive;
-    m_scan_spec_builder.add_row_interval(start_row,
-        scan_spec.row_intervals[0].start_inclusive, end_row,
-        scan_spec.row_intervals[0].end_inclusive);
+    if (!scan_spec.scan_and_filter_rows) {
+      start_row = (scan_spec.row_intervals[0].start == 0) ? ""
+          : scan_spec.row_intervals[0].start;
+      if (scan_spec.row_intervals[0].end == 0 ||
+          scan_spec.row_intervals[0].end[0] == 0)
+        end_row = Key::END_ROW_MARKER;
+      else
+        end_row = scan_spec.row_intervals[0].end;
+      int cmpval = strcmp(start_row, end_row);
+      if (cmpval > 0)
+        HT_THROW(Error::BAD_SCAN_SPEC, format("start_row (%s) > end_row (%s)", start_row, end_row));
+      if (cmpval == 0 && !scan_spec.row_intervals[0].start_inclusive
+          && !scan_spec.row_intervals[0].end_inclusive)
+        HT_THROW(Error::BAD_SCAN_SPEC, "empty row interval");
+      m_start_row = start_row;
+      m_end_row = end_row;
+      m_end_inclusive = scan_spec.row_intervals[0].end_inclusive;
+      m_scan_spec_builder.add_row_interval(start_row,
+          scan_spec.row_intervals[0].start_inclusive, end_row,
+          scan_spec.row_intervals[0].end_inclusive);
+    }
+    else {
+      m_scan_spec_builder.set_scan_and_filter_rows(true);
+      // order and filter duplicated rows
+      CstrRowSet rowset;
+      foreach (const RowInterval& ri, scan_spec.row_intervals)
+        rowset.insert(ri.start); // ri.start always equals to ri.end
+      // setup ordered row intervals and rowset
+      m_scan_spec_builder.reserve_rows(rowset.size());
+      foreach (const char* r, rowset) {
+        m_scan_spec_builder.add_row_interval(r, true, "", true); // end is set to "" in order to safe space
+        m_rowset.insert(m_scan_spec_builder.get().row_intervals.back().start); // Cstr's must be taken from m_scan_spec_builder and not from scan_spec
+      }
+      m_start_row = *m_rowset.begin();
+      m_end_row = *m_rowset.rbegin();
+      m_end_inclusive = true;
+    }
   }
   else if (!scan_spec.cell_intervals.empty()) {
     start_row = (scan_spec.cell_intervals[0].start_row == 0) ? ""
@@ -112,8 +132,11 @@ void IntervalScanner::init(const ScanSpec &scan_spec, Timer &timer) {
     if (scan_spec.cell_intervals[0].start_column == 0)
       HT_THROW(Error::BAD_SCAN_SPEC,
                "Bad cell interval (start_column == NULL)");
-    end_row = (scan_spec.cell_intervals[0].end_row == 0) ? Key::END_ROW_MARKER
-        : scan_spec.cell_intervals[0].end_row;
+    if (scan_spec.cell_intervals[0].end_row == 0 ||
+        scan_spec.cell_intervals[0].end_row[0] == 0)
+      end_row = Key::END_ROW_MARKER;
+    else
+      end_row = scan_spec.cell_intervals[0].end_row;
     if (scan_spec.cell_intervals[0].end_column == 0)
       HT_THROW(Error::BAD_SCAN_SPEC,
                "Bad cell interval (end_column == NULL)");
@@ -132,8 +155,9 @@ void IntervalScanner::init(const ScanSpec &scan_spec, Timer &timer) {
         scan_spec.cell_intervals[0].start_inclusive,
         end_row, scan_spec.cell_intervals[0].end_column,
         scan_spec.cell_intervals[0].end_inclusive);
-    m_start_row = scan_spec.cell_intervals[0].start_row;
-    m_end_row = scan_spec.cell_intervals[0].end_row;
+
+    m_start_row = start_row;
+    m_end_row = end_row;
     m_end_inclusive = true;
   }
   else {
@@ -150,6 +174,7 @@ void IntervalScanner::init(const ScanSpec &scan_spec, Timer &timer) {
                                         scan_spec.time_interval.second);
 
   m_scan_spec_builder.set_return_deletes(scan_spec.return_deletes);
+  m_scan_spec_builder.set_keys_only(scan_spec.keys_only);
 
   // start scan asynchronously (can trigger table not found exceptions)
   m_create_scanner_row = m_start_row;
@@ -199,6 +224,11 @@ int IntervalScanner::fetch_create_scanner_result(Timer &timer) {
 
   if (m_readahead && m_end_row.compare(m_range_info.end_row) > 0) {
     m_create_scanner_row = m_range_info.end_row;
+    // if rowset scan update start row for next range
+    if (!m_rowset.empty())
+      if (m_create_scanner_row.compare(*m_rowset.begin()) < 0)
+        m_create_scanner_row = *m_rowset.begin();
+
     m_create_scanner_row.append(1,1);  // construct row key in next range
     find_range_and_start_scan(m_create_scanner_row.c_str(), timer);
   }
@@ -207,7 +237,6 @@ int IntervalScanner::fetch_create_scanner_result(Timer &timer) {
 }
 
 bool IntervalScanner::next(Cell &cell) {
-  int error;
   SerializedKey serkey;
   ByteString value;
   Key key;
@@ -228,6 +257,11 @@ bool IntervalScanner::next(Cell &cell) {
       }
       if (!m_create_scanner_outstanding) {
         m_create_scanner_row = m_range_info.end_row;
+        // if rowset scan update start row for next range
+        if (!m_rowset.empty())
+          if (m_create_scanner_row.compare(*m_rowset.begin()) < 0)
+            m_create_scanner_row = *m_rowset.begin();
+
         m_create_scanner_row.append(1,1);  // construct row key in next range
         find_range_and_start_scan(m_create_scanner_row.c_str(), timer);
       }
@@ -244,7 +278,7 @@ bool IntervalScanner::next(Cell &cell) {
         }
         else {
           m_fetch_outstanding = false;
-          error = m_scanblock.load(m_event);
+          m_scanblock.load(m_event);
           request_next_scanblock(m_range_info.addr);
         }
       }
@@ -253,17 +287,16 @@ bool IntervalScanner::next(Cell &cell) {
         m_range_server.fetch_scanblock(m_range_info.addr,
                    m_scanblock.get_scanner_id(), m_scanblock, timer);
       }
-
     }
   }
 
   if (m_scanblock.next(serkey, value)) {
     Schema::ColumnFamily *cf;
+
     if (!key.load(serkey))
       HT_THROW(Error::BAD_KEY, "");
 
     // check for end row
-
     if (!strcmp(key.row, Key::END_ROW_MARKER)) {
       if (!m_scanblock.eos())
         m_range_server.destroy_scanner(m_range_info.addr,
@@ -305,22 +338,25 @@ bool IntervalScanner::next(Cell &cell) {
       }
     }
 
-    cell.row_key = key.row;
-    cell.column_qualifier = key.column_qualifier;
     if ((cf = m_schema->get_column_family(key.column_family_code)) == 0) {
       if (key.flag != FLAG_DELETE_ROW)
-	HT_THROWF(Error::BAD_KEY, "Unexpected column family code %d",
-		  (int)key.column_family_code);
+        HT_THROWF(Error::BAD_KEY, "Unexpected column family code %d",
+                  (int)key.column_family_code);
       cell.column_family = "";
     }
     else
       cell.column_family = cf->name.c_str();
-
+    cell.row_key = key.row;
+    cell.column_qualifier = key.column_qualifier;
     cell.timestamp = key.timestamp;
     cell.revision = key.revision;
     cell.value_len = value.decode_length(&cell.value);
     cell.flag = key.flag;
     m_bytes_scanned += key.length + cell.value_len;
+
+    // if rowset scan remove scanned row
+    while (!m_rowset.empty() && strcmp(*m_rowset.begin(), key.row) < 0)
+      m_rowset.erase(m_rowset.begin());
     return true;
   }
 
@@ -338,6 +374,13 @@ IntervalScanner::find_range_and_start_scan(const char *row_key, Timer &timer, bo
 {
   RangeSpec  range;
   DynamicBuffer dbuf(0);
+
+  // if rowset scan adjust row intervals
+  if (!m_rowset.empty()) {
+    RowIntervals& row_intervals = m_scan_spec_builder.get().row_intervals;
+    while (row_intervals.size() && strcmp(row_intervals.front().start, row_key) < 0)
+      row_intervals.erase(row_intervals.begin());
+  }
 
   timer.start();
 

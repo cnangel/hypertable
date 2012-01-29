@@ -1,11 +1,11 @@
 #
-# Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+# Copyright (C) 2007-2012 Hypertable, Inc.
 #
 # This file is part of Hypertable.
 #
 # Hypertable is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
-# as published by the Free Software Foundation; version 2
+# as published by the Free Software Foundation; version 3
 # of the License, or any later version.
 #
 # Hypertable is distributed in the hope that it will be useful,
@@ -40,15 +40,16 @@ CellStoreTrailerV1.cc
 CellStoreTrailerV2.cc
 CellStoreTrailerV3.cc
 CellStoreTrailerV4.cc
+CellStoreTrailerV5.cc
 CellStore.cc
 CellStoreV0.cc
 CellStoreV1.cc
 CellStoreV2.cc
 CellStoreV3.cc
 CellStoreV4.cc
+CellStoreV5.cc
 Config.cc
 ConnectionHandler.cc
-EventHandlerMasterConnection.cc
 FileBlockCache.cc
 FillScanBlock.cc
 Global.cc
@@ -60,7 +61,8 @@ KeyCompressorPrefix.cc
 KeyDecompressorNone.cc
 KeyDecompressorPrefix.cc
 LiveFileTracker.cc
-Location.cc
+LoadMetricsRange.cc
+LocationInitializer.cc
 MaintenancePrioritizer.cc
 MaintenancePrioritizerLogCleanup.cc
 MaintenancePrioritizerLowMemory.cc
@@ -68,14 +70,20 @@ MaintenanceQueue.cc
 MaintenanceScheduler.cc
 MaintenanceTaskCompaction.cc
 MaintenanceTaskMemoryPurge.cc
+MaintenanceTaskRelinquish.cc
 MaintenanceTaskSplit.cc
 MergeScanner.cc
+MergeScannerRange.cc
+MergeScannerAccessGroup.cc
+MetaLogEntityRange.cc
+MetaLogDefinitionRangeServer.cc
 MetadataNormal.cc
 MetadataRoot.cc
 QueryCache.cc
 Range.cc
 RangeServer.cc
 RangeStatsGatherer.cc
+RequestHandlerAcknowledgeLoad.cc
 RequestHandlerCompact.cc
 RequestHandlerCreateScanner.cc
 RequestHandlerDestroyScanner.cc
@@ -85,15 +93,19 @@ RequestHandlerDump.cc
 RequestHandlerGetStatistics.cc
 RequestHandlerGroupCommit.cc
 RequestHandlerFetchScanblock.cc
+RequestHandlerHeapcheck.cc
 RequestHandlerDropTable.cc
 RequestHandlerLoadRange.cc
+RequestHandlerMetadataSync.cc
 RequestHandlerUpdateSchema.cc
+RequestHandlerRelinquishRange.cc
 RequestHandlerReplayBegin.cc
 RequestHandlerReplayLoadRange.cc
 RequestHandlerReplayUpdate.cc
 RequestHandlerReplayCommit.cc
 RequestHandlerStatus.cc
 RequestHandlerUpdate.cc
+RequestHandlerWaitForMaintenance.cc
 RequestHandlerClose.cc
 RequestHandlerCommitLogSync.cc
 ResponseCallbackCreateScanner.cc
@@ -106,6 +118,7 @@ TableIdCache.cc
 TableInfo.cc
 TableInfoMap.cc
 TimerHandler.cc
+UpdateThread.cc
 )
 
 if (USE_TCMALLOC)

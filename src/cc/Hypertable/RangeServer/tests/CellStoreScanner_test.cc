@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -40,8 +40,7 @@
 #include "Hypertable/Lib/SerializedKey.h"
 
 #include "../CellStoreFactory.h"
-#include "../CellStoreV4.h"
-#include "../FileBlockCache.h"
+#include "../CellStoreV5.h"
 #include "../Global.h"
 
 #include <cstdlib>
@@ -71,7 +70,7 @@ namespace {
   "</Schema>";
 
 
-  const char *schema2_str = 
+  const char *schema2_str =
     "<Schema>\n"
     "  <AccessGroup name=\"default\">\n"
     "    <ColumnFamily id=\"1\">\n"
@@ -544,6 +543,25 @@ namespace {
     out << flush;
     return count;
   }
+
+  void check_replaced_files(CellStorePtr &cs, vector<String> &replaced_files_write,
+                            ostream &out) {
+
+    const vector<String> &replaced_files_read = cs->get_replaced_files();
+    if (replaced_files_read.size() != replaced_files_write.size()) {
+      HT_ERRORF("Wrote %lu replaced_files read %lu", (unsigned long)replaced_files_write.size(),
+		(unsigned long)replaced_files_read.size());
+      exit(1);
+    }
+    for (size_t ii=0; ii < replaced_files_read.size(); ++ii) {
+      if (replaced_files_read[ii] != replaced_files_write[ii]) {
+        HT_ERRORF("Wrote %s as %luth replaced file read %s", replaced_files_write[ii].c_str(),
+		  (unsigned long)ii,  replaced_files_read[ii].c_str());
+        exit(1);
+      }
+      out << replaced_files_read[ii] << "\n";
+    }
+  }
 }
 
 
@@ -561,6 +579,16 @@ int main(int argc, char **argv) {
     const char *select_cf_test = "select_cf_test";
     char select_cf_row[256];
     String cf_foo = "foo";
+    vector<String> replaced_files_write;
+    TableIdentifier table_id("0");
+
+    // should coalesce and be in 1 block along with trailer
+    replaced_files_write.push_back("/hypertable/tables/0/1/default/qyoNKN5rd__dbHKv/cs0");
+    replaced_files_write.push_back("/hypertable/tables/0/1/default/qyoNKN5rd__dbHKv/cs100");
+    replaced_files_write.push_back("/hypertable/tables/0/1/default/qyoNKN5rd__dbHKv/cs10");
+    replaced_files_write.push_back("/hypertable/tables/0/1/default/qyoNKN5rd__dbHKv/cs3");
+    replaced_files_write.push_back("/hypertable/tables/0/1/default/qyoNKN5rd__dbHKv/cs1");
+    replaced_files_write.push_back("/hypertable/tables/0/1/default/qyoNKN5rd__dbHKv/cs11");
 
     Config::init(argc, argv);
 
@@ -578,15 +606,14 @@ int main(int argc, char **argv) {
     Global::dfs = new DfsBroker::Client(conn_mgr, addr, 15000);
 
     // force broker client to be destroyed before connection manager
-    client = (DfsBroker::Client *)Global::dfs;
+    client = (DfsBroker::Client *)Global::dfs.get();
 
     if (!client->wait_for_connection(15000)) {
       HT_ERROR("Unable to connect to DFS");
       return 1;
     }
 
-    Global::block_cache = new FileBlockCache(10000000LL, 20000000LL);
-    Global::memory_tracker = new MemoryTracker(Global::block_cache);
+    Global::memory_tracker = new MemoryTracker(0, 0);
 
     String testdir = "/CellStoreScanner_test";
     client->mkdirs(testdir);
@@ -596,15 +623,16 @@ int main(int argc, char **argv) {
     String csname = testdir + "/cs0";
     PropertiesPtr cs_props = new Properties();
 
-    SchemaPtr schema = Schema::new_instance(schema_str, strlen(schema_str),
-                                            true);
+    SchemaPtr schema = Schema::new_instance(schema_str, strlen(schema_str));
+
     if (!schema->is_valid()) {
       HT_ERRORF("Schema Parse Error: %s", schema->get_error_string());
       exit(1);
     }
 
-    cs = new CellStoreV4(Global::dfs, schema.get());
-    HT_TRY("creating cellstore", cs->create(csname.c_str(), 0, cs_props));
+    cs = new CellStoreV5(Global::dfs.get(), schema.get());
+    HT_TRY("creating cellstore", cs->create(csname.c_str(), 0, cs_props, &table_id));
+    cs->set_replaced_files(replaced_files_write);
 
     DynamicBuffer dbuf(64000);
     char rowbuf[256];
@@ -706,7 +734,6 @@ int main(int argc, char **argv) {
       out << key << "\n";
     }
 
-    TableIdentifier table_id("0");
     cs->finalize(&table_id);
 
     RangeSpec range;
@@ -1367,6 +1394,10 @@ int main(int argc, char **argv) {
     scanner = cs->create_scanner(scan_ctx);
     display_scan(scanner, out);
 
+    out << "[replaced-files-0]\n";
+    cs = CellStoreFactory::open(csname, "", "http://www.omega.com/");
+    check_replaced_files(cs, replaced_files_write, out);
+
     out << "[cs-range-0]\n";
 
     cs = CellStoreFactory::open(csname, "", "http://www.omega.com/");
@@ -1391,8 +1422,16 @@ int main(int argc, char **argv) {
     csname = testdir + "/cs1";
     cs_props->set("blocksize", (uint32_t)10000);
     cs_props->set("compressor", String("none"));
-    cs = new CellStoreV4(Global::dfs, schema.get());
-    HT_TRY("creating cellstore", cs->create(csname.c_str(), 0, cs_props));
+    cs = new CellStoreV5(Global::dfs.get(), schema.get());
+    HT_TRY("creating cellstore", cs->create(csname.c_str(), 0, cs_props, &table_id));
+    // should not coalesce and be in a separate block from trailer
+    replaced_files_write.push_back("1/hypertable/tables/0/1/default/qyoNKN5rd__dbHKv/cs0");
+    replaced_files_write.push_back("2/hypertable/tables/0/1/default/qyoNKN5rd__dbHKv/cs0");
+    replaced_files_write.push_back("3/hypertable/tables/0/1/default/qyoNKN5rd__dbHKv/cs0");
+    replaced_files_write.push_back("4/hypertable/tables/0/1/default/qyoNKN5rd__dbHKv/cs0");
+    replaced_files_write.push_back("5/hypertable/tables/0/1/default/qyoNKN5rd__dbHKv/cs0");
+    replaced_files_write.push_back("6/hypertable/tables/0/1/default/qyoNKN5rd__dbHKv/cs0");
+    cs->set_replaced_files(replaced_files_write);
 
     value = "Like a lot of new ideas, Media Cloud started with a long-running argument among friends.  Ethan Zuckerman and a handful of";
     uptr = valuebuf;
@@ -1422,9 +1461,13 @@ int main(int argc, char **argv) {
        5: offset=50500 size=10100 row=row000437
        6: offset=60600 size=8582 row=row000499
      **/
+    out << "[replaced-files-1]\n";
+    cs = CellStoreFactory::open(csname, "", "row000200/");
+    check_replaced_files(cs, replaced_files_write, out);
 
     out << "[range-restriction-1]\n";
     cs = CellStoreFactory::open(csname, "", "row000200");
+
 
     ssbuilder.clear();
     ssbuilder.add_row_interval("row000050", true,
@@ -1486,14 +1529,19 @@ int main(int argc, char **argv) {
     csname = testdir + "/cs2";
     cs_props = new Properties();
 
-    schema = Schema::new_instance(schema2_str, strlen(schema2_str), true);
+    schema = Schema::new_instance(schema2_str, strlen(schema2_str));
     if (!schema->is_valid()) {
       HT_ERRORF("Schema Parse Error: %s", schema->get_error_string());
       exit(1);
     }
 
-    cs = new CellStoreV4(Global::dfs, schema.get());
-    HT_TRY("creating cellstore", cs->create(csname.c_str(), 0, cs_props));
+    cs = new CellStoreV5(Global::dfs.get(), schema.get());
+    HT_TRY("creating cellstore", cs->create(csname.c_str(), 0, cs_props, &table_id));
+    // should coalesce and be in 2 blocks, with the 2nd block also containing the trailer
+    replaced_files_write.push_back("7/hypertable/tables/0/1/default/qyoNKN5rd__dbHKv/cs0");
+    replaced_files_write.push_back("8/hypertable/tables/0/1/default/qyoNKN5rd__dbHKv/cs0");
+    replaced_files_write.push_back("9/hypertable/tables/0/1/default/qyoNKN5rd__dbHKv/cs0");
+    cs->set_replaced_files(replaced_files_write);
 
     wordi = 0;
     serkeyv.clear();
@@ -1520,12 +1568,16 @@ int main(int argc, char **argv) {
     }
 
     cs->finalize(&table_id);
+    out << "[replaced-files-2]\n";
+    cs = CellStoreFactory::open(csname, "", "row000200/");
+    check_replaced_files(cs, replaced_files_write, out);
 
     int64_t expiration_time = boost::any_cast<int64_t>(cs->get_trailer()->get("expiration_time"));
     int64_t expirable_data = boost::any_cast<int64_t>(cs->get_trailer()->get("expirable_data"));
-
+    int64_t delete_count = boost::any_cast<int64_t>(cs->get_trailer()->get("delete_count"));
     out << "trailer.expiration_time = " << expiration_time << "\n";
     out << "trailer.expirable_data = " << expirable_data << "\n";
+    out << "trailer.delete_count= " << delete_count << "\n";
 
     out << flush;
 
@@ -1533,6 +1585,10 @@ int main(int argc, char **argv) {
                      "CellStoreScanner_test.golden";
     if (system(cmd_str.c_str()) != 0)
       return 1;
+
+    // close cell store
+    scanner = 0;
+    cs = 0;
 
     client->rmdir(testdir);
   }

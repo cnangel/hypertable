@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2010 Sanjit Jhala (Hypertable, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -76,7 +76,7 @@ implements org.apache.hadoop.mapred.InputFormat<BytesWritable, Row>, JobConfigur
           job.set(SCAN_SPEC, (new ScanSpec()).toSerializedText());
         }
         m_base_spec = ScanSpec.serializedTextToScanSpec( job.get(SCAN_SPEC) );
-        m_base_spec.setRevs(1);
+        m_base_spec.setVersions(1);
       }
     }
     catch (Exception e) {
@@ -86,7 +86,7 @@ implements org.apache.hadoop.mapred.InputFormat<BytesWritable, Row>, JobConfigur
 
   public void set_scan_spec(ScanSpec spec) {
     m_base_spec = spec;
-    m_base_spec.setRevs(1);
+    m_base_spec.setVersions(1);
   }
 
   public void set_namespace(String namespace) {
@@ -131,7 +131,7 @@ implements org.apache.hadoop.mapred.InputFormat<BytesWritable, Row>, JobConfigur
       m_scan_spec = scan_spec;
       try {
         m_ns = m_client.open_namespace(m_namespace);
-        m_scanner = m_client.open_scanner(m_ns, m_tablename, m_scan_spec, true);
+        m_scanner = m_client.open_scanner(m_ns, m_tablename, m_scan_spec);
       }
       catch (TTransportException e) {
         e.printStackTrace();

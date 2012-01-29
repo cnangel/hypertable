@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -39,7 +39,8 @@ using namespace std;
 
 CellCache::CellCache()
   : m_arena(), m_cell_map(std::less<const SerializedKey>(), Alloc(m_arena)),
-    m_deletes(0), m_collisions(0), m_frozen(false), m_have_counter_deletes(false) {
+    m_deletes(0), m_collisions(0), m_key_bytes(0), m_value_bytes(0),
+    m_frozen(false), m_have_counter_deletes(false) {
   assert(Config::properties); // requires Config::init* first
   m_arena.set_page_size((size_t)
       Config::get_i32("Hypertable.RangeServer.AccessGroup.CellCache.PageSize"));
@@ -53,6 +54,9 @@ void CellCache::add(const Key &key, const ByteString value) {
   uint8_t *ptr;
   size_t total_len = key.length + value.length();
 
+  m_key_bytes += key.length;
+  m_value_bytes += value.length();
+
   assert(!m_frozen);
 
   new_key.ptr = ptr = m_arena.alloc(total_len);
@@ -62,12 +66,16 @@ void CellCache::add(const Key &key, const ByteString value) {
 
   value.write(ptr);
 
-  if (! m_cell_map.insert(CellMap::value_type(new_key, key.length)).second) {
+  CellMap::value_type v(new_key, key.length);
+  std::pair<CellMap::iterator, bool> r = m_cell_map.insert(v);
+  if (!r.second) {
+    m_cell_map.erase(r.first);
+    m_cell_map.insert(v);
     m_collisions++;
     HT_WARNF("Collision detected key insert (row = %s)", new_key.row());
   }
   else {
-    if (key.flag <= FLAG_DELETE_CELL)
+    if (key.flag <= FLAG_DELETE_CELL_VERSION)
       m_deletes++;
   }
 }
@@ -88,6 +96,8 @@ void CellCache::add_counter(const Key &key, const ByteString value) {
     m_have_counter_deletes = true;
     return;
   }
+
+  HT_ASSERT(*value.ptr == 8);
 
   CellMap::iterator iter = m_cell_map.lower_bound(key.serial);
 
@@ -114,10 +124,12 @@ void CellCache::add_counter(const Key &key, const ByteString value) {
   ByteString old_value;
   old_value.ptr = (*iter).first.ptr + (*iter).second;
 
+  HT_ASSERT(*old_value.ptr == 8 || *old_value.ptr == 9);
+
   /*
-   * Sanity check the old value, if it's a reset just insert the new value
+   * If old value was a reset, just insert the new value
    */
-  if (*old_value.ptr != 8) {
+  if (*old_value.ptr == 9) {
     add(key, value);
     return;
   }

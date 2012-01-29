@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -240,8 +240,8 @@ int main(int argc, char **argv) {
               line_time = (time_t)strtoll(base, &end, 10);
             else
               line_time = (time_t)(strtoll(base, &end, 10) / 1000000000LL);
-            if ((!newer && line_time < cutoff_time) ||
-                newer && line_time >= cutoff_time)
+            if ((!newer && (line_time < cutoff_time)) ||
+                (newer && (line_time >= cutoff_time)))
               continue;
           }
         }
@@ -251,10 +251,11 @@ int main(int argc, char **argv) {
       }
     }
     cout << flush;
-
+    _exit(0);
   }
   catch (std::exception &e) {
     cerr << "Error - " << e.what() << endl;
     exit(1);
   }
+
 }

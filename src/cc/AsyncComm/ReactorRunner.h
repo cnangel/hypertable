@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2007 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -37,7 +37,7 @@ namespace Hypertable {
     void operator()();
     void set_reactor(ReactorPtr &reactor_ptr) { m_reactor_ptr = reactor_ptr; }
     static bool shutdown;
-    static bool record_arrival_clocks;
+    static bool record_arrival_time;
     static HandlerMapPtr handler_map;
   private:
     void cleanup_and_remove_handlers(std::set<IOHandler *> &handlers);

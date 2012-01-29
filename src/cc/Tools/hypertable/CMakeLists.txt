@@ -1,9 +1,9 @@
 #
-# Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+# Copyright (C) 2007-2012 Hypertable, Inc.
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
-# as published by the Free Software Foundation; either version 2
+# as published by the Free Software Foundation; either version 3
 # of the License, or any later version.
 #
 # This program is distributed in the hope that it will be useful,
@@ -34,6 +34,14 @@ target_link_libraries(hypertable_test HyperComm)
 
 configure_file(${HYPERTABLE_SOURCE_DIR}/conf/hypertable.cfg
                ${DST_DIR}/hypertable.cfg)
+configure_file(${SRC_DIR}/test/offset_test.golden
+               ${DST_DIR}/offset_test.golden)
+configure_file(${SRC_DIR}/test/offset_test.hql
+               ${DST_DIR}/offset_test.hql)
+configure_file(${SRC_DIR}/test/timeorder_test.golden
+               ${DST_DIR}/timeorder_test.golden)
+configure_file(${SRC_DIR}/test/timeorder_test.hql
+               ${DST_DIR}/timeorder_test.hql)
 configure_file(${SRC_DIR}/test/hypertable_test.golden
                ${DST_DIR}/hypertable_test.golden)
 configure_file(${SRC_DIR}/test/hypertable_select_gz_test.golden
@@ -69,19 +77,6 @@ configure_file(${SRC_DIR}/test/hypertable_escape_test.tsv
 configure_file(${SRC_DIR}/test/hypertable_escape_test.golden
                ${DST_DIR}/hypertable_escape_test.golden COPYONLY)
 add_test(Hypertable-shell-ldi-select hypertable_ldi_select_test ${INSTALL_DIR})
-
-# hypertable_refresh_schema_test 
-add_executable(hypertable_refresh_schema_test test/hypertable_refresh_schema_test.cc ${TEST_DEPENDENCIES})
-target_link_libraries(hypertable_refresh_schema_test HyperComm)
-
-configure_file(${SRC_DIR}/test/hypertable_refresh_schema_test_c1.golden 
-               ${DST_DIR}/hypertable_refresh_schema_test_c1.golden)
-configure_file(${SRC_DIR}/test/hypertable_refresh_schema_test_c2.golden 
-               ${DST_DIR}/hypertable_refresh_schema_test_c2.golden)
-configure_file(${SRC_DIR}/test/hypertable_refresh_schema_test_c3.golden 
-               ${DST_DIR}/hypertable_refresh_schema_test_c3.golden)
-add_test(Hypertable-shell-refresh-schema hypertable_refresh_schema_test)
-
 
 if (NOT HT_COMPONENT_INSTALL)
   install(TARGETS hypertable RUNTIME DESTINATION bin)

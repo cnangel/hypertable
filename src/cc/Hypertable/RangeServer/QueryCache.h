@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2009 Doug Judd (Hypertable, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -77,10 +77,12 @@ namespace Hypertable {
 
     void dump();
 
-    uint64_t available_memory() { return m_avail_memory; }
+    uint64_t available_memory() { ScopedLock lock(m_mutex); return m_avail_memory; }
 
-    void get_stats(uint64_t &max_memory, uint64_t &available_memory,
-                   uint64_t &total_lookups, uint64_t &total_hits);
+    uint64_t memory_used() { ScopedLock lock(m_mutex); return m_max_memory-m_avail_memory; }
+
+    void get_stats(uint64_t *max_memoryp, uint64_t *available_memoryp,
+                   uint64_t *total_lookupsp, uint64_t *total_hitsp);
 
   private:
 

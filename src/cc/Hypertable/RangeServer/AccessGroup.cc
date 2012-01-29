@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -20,6 +20,7 @@
  */
 
 #include "Common/Compat.h"
+#include <cstdlib>
 #include <cstring>
 #include <algorithm>
 #include <iterator>
@@ -33,10 +34,10 @@
 #include "CellCacheScanner.h"
 #include "CellStoreFactory.h"
 #include "CellStoreReleaseCallback.h"
-#include "CellStoreV4.h"
+#include "CellStoreV5.h"
 #include "Global.h"
 #include "MaintenanceFlag.h"
-#include "MergeScanner.h"
+#include "MergeScannerAccessGroup.h"
 #include "MetadataNormal.h"
 #include "MetadataRoot.h"
 #include "Config.h"
@@ -51,17 +52,16 @@ AccessGroup::AccessGroup(const TableIdentifier *identifier,
     m_compression_ratio(1.0), m_earliest_cached_revision(TIMESTAMP_MAX),
     m_earliest_cached_revision_saved(TIMESTAMP_MAX),
     m_latest_stored_revision(TIMESTAMP_MIN), m_collisions(0),
-    m_file_tracker(identifier, schema, range, ag->name), m_is_root(false), m_drop(false),
-    m_recovering(false) {
+    m_file_tracker(identifier, schema, range, ag->name), m_is_root(false),
+    m_recovering(false), m_needs_merging(false) {
 
   m_table_name = m_identifier.id;
   m_start_row = range->start_row;
   m_end_row = range->end_row;
   m_range_name = m_table_name + "[" + m_start_row + ".." + m_end_row + "]";
   m_full_name = m_range_name + "(" + m_name + ")";
-  m_cell_cache = new CellCache();
 
-  m_file_basename = Global::toplevel_dir + "/tables/";
+  range_dir_initialize();
 
   foreach(Schema::ColumnFamily *cf, ag->columns)
     m_column_families.insert(cf->id);
@@ -90,34 +90,6 @@ AccessGroup::AccessGroup(const TableIdentifier *identifier,
       m_cellstore_props->get<BloomFilterMode>("bloom-filter-mode");
 }
 
-
-AccessGroup::~AccessGroup() {
-  if (m_drop) {
-    if (m_identifier.is_metadata()) {
-      HT_ERROR("~AccessGroup has drop bit set, but table is METADATA");
-      return;
-    }
-    String metadata_key = format("%s:%s", m_identifier.id, m_end_row.c_str());
-    TableMutatorPtr mutator;
-    KeySpec key;
-
-    try {
-      mutator = Global::metadata_table->create_mutator();
-
-      key.row = metadata_key.c_str();
-      key.row_len = metadata_key.length();
-      key.column_family = "Files";
-      key.column_qualifier = m_name.c_str();
-      key.column_qualifier_len = m_name.length();
-      mutator->set(key, (uint8_t *)"!", 1);
-      mutator->flush();
-    }
-    catch (Hypertable::Exception &e) {
-      HT_ERRORF("Problem updating 'File' column of METADATA (%s) - %s",
-                metadata_key.c_str(), Error::get_text(e.code()));
-    }
-  }
-}
 
 /**
  * Currently supports only adding and deleting column families
@@ -162,7 +134,9 @@ void AccessGroup::update_schema(SchemaPtr &schema,
  * CellCache should be locked as well.
  */
 void AccessGroup::add(const Key &key, const ByteString value) {
-  if (key.revision > m_latest_stored_revision) {
+  if (!m_cell_cache)
+    m_cell_cache = new CellCache();
+  if (key.revision > m_latest_stored_revision || Global::ignore_clock_skew_errors) {
     if (key.revision < m_earliest_cached_revision)
       m_earliest_cached_revision = key.revision;
     if (m_schema->column_is_counter(key.column_family_code))
@@ -187,7 +161,9 @@ void AccessGroup::add(const Key &key, const ByteString value) {
 
 
 CellListScanner *AccessGroup::create_scanner(ScanContextPtr &scan_context) {
-  MergeScanner *scanner = new MergeScanner(scan_context, true, true);
+  bool all = scan_context->spec ? scan_context->spec->return_deletes : false;
+  MergeScanner *scanner = new MergeScannerAccessGroup(scan_context, all);
+
   CellStoreReleaseCallback callback(this);
 
   {
@@ -197,8 +173,10 @@ CellListScanner *AccessGroup::create_scanner(ScanContextPtr &scan_context) {
 
   try {
     ScopedLock lock(m_mutex);
+    uint64_t initial_bytes_read;
 
-    scanner->add_scanner(m_cell_cache->create_scanner(scan_context));
+    if (m_cell_cache)
+      scanner->add_scanner(m_cell_cache->create_scanner(scan_context));
 
     if (m_immutable_cache)
       scanner->add_scanner(m_immutable_cache->create_scanner(scan_context));
@@ -214,6 +192,8 @@ CellListScanner *AccessGroup::create_scanner(ScanContextPtr &scan_context) {
 
         bloom_filter_disabled = boost::any_cast<uint8_t>(m_stores[i].cs->get_trailer()->get("bloom_filter_mode")) == BLOOM_FILTER_DISABLED;
 
+        initial_bytes_read = m_stores[i].cs->bytes_read();
+
         // Query bloomfilter only if it is enabled and a start row has been specified
         // (ie query is not something like select bar from foo;)
         if (bloom_filter_disabled ||
@@ -225,7 +205,7 @@ CellListScanner *AccessGroup::create_scanner(ScanContextPtr &scan_context) {
           }
           else
             scanner->add_scanner(m_stores[i].cs->create_scanner(scan_context));
-          callback.add_file( strip_file_basename(m_stores[i].cs->get_filename()) );
+          callback.add_file(m_stores[i].cs->get_filename());
         }
         else {
           m_stores[i].bloom_filter_accesses++;
@@ -237,9 +217,13 @@ CellListScanner *AccessGroup::create_scanner(ScanContextPtr &scan_context) {
             }
             else
               scanner->add_scanner(m_stores[i].cs->create_scanner(scan_context));
-            callback.add_file( strip_file_basename(m_stores[i].cs->get_filename()) );
+            callback.add_file(m_stores[i].cs->get_filename());
           }
         }
+
+        if (m_stores[i].cs->bytes_read() > initial_bytes_read)
+          scanner->add_disk_read(m_stores[i].cs->bytes_read() - initial_bytes_read);
+
       }
     }
   }
@@ -282,27 +266,37 @@ AccessGroup::get_split_rows(std::vector<String> &split_rows,
                             bool include_cache) {
   ScopedLock lock(m_mutex);
   const char *row;
+
   for (size_t i=0; i<m_stores.size(); i++) {
     row = m_stores[i].cs->get_split_row();
-    if (row)
+    if (row) {
       split_rows.push_back(row);
+    }
   }
   if (include_cache) {
-    if (m_immutable_cache &&
-        m_immutable_cache->size() > m_cell_cache->size())
+    if (m_cell_cache) {
+      if (m_immutable_cache &&
+          m_immutable_cache->size() > m_cell_cache->size())
+        m_immutable_cache->get_split_rows(split_rows);
+      else
+        m_cell_cache->get_split_rows(split_rows);
+    }
+    else if (m_immutable_cache)
       m_immutable_cache->get_split_rows(split_rows);
-    else
-      m_cell_cache->get_split_rows(split_rows);
   }
 }
 
 void AccessGroup::get_cached_rows(std::vector<String> &rows) {
   ScopedLock lock(m_mutex);
-  if (m_immutable_cache &&
-      m_immutable_cache->size() > m_cell_cache->size())
+  if (m_cell_cache) {
+    if (m_immutable_cache &&
+        m_immutable_cache->size() > m_cell_cache->size())
+      m_immutable_cache->get_rows(rows);
+    else
+      m_cell_cache->get_rows(rows);
+  }
+  else if (m_immutable_cache)
     m_immutable_cache->get_rows(rows);
-  else
-    m_cell_cache->get_rows(rows);
 }
 
 
@@ -310,19 +304,16 @@ uint64_t AccessGroup::disk_usage() {
   ScopedLock lock(m_mutex);
   uint64_t usage;
   uint64_t du = (m_in_memory) ? 0 : m_disk_usage;
-  uint64_t mu = m_cell_cache->memory_used();
+  uint64_t mu = m_cell_cache ? m_cell_cache->memory_used() : 0;
   if (m_immutable_cache)
     mu += m_immutable_cache->memory_used();
   usage = du + (uint64_t)(m_compression_ratio * (float)mu);
-  if (usage < 0)
-    HT_WARN_OUT << "[Issue 339] Disk usage for " << m_full_name << "=" << usage
-                << HT_END;
   return usage;
 }
 
 uint64_t AccessGroup::memory_usage() {
   ScopedLock lock(m_mutex);
-  uint64_t mu = m_cell_cache->memory_used();
+  uint64_t mu = m_cell_cache ? m_cell_cache->memory_used() : 0;
   if (m_immutable_cache)
     mu += m_immutable_cache->memory_used();
 
@@ -334,13 +325,11 @@ uint64_t AccessGroup::memory_usage() {
 
 void AccessGroup::space_usage(int64_t *memp, int64_t *diskp) {
   ScopedLock lock(m_mutex);
-  *memp = m_cell_cache->memory_used();
+  *memp = m_cell_cache ? m_cell_cache->memory_used() : 0;
   if (m_immutable_cache)
     *memp += m_immutable_cache->memory_used();
   *diskp = (m_in_memory) ? 0 : m_disk_usage;
   *diskp += (int64_t)(m_compression_ratio * (float)*memp);
-  if (*diskp < 0)
-    HT_WARN_OUT << "[Issue 339] Disk usage for " << m_full_name << "=" << *diskp << HT_END;
 }
 
 
@@ -370,6 +359,9 @@ uint64_t AccessGroup::purge_memory(MaintenanceFlag::Map &subtask_map) {
 AccessGroup::MaintenanceData *AccessGroup::get_maintenance_data(ByteArena &arena, time_t now) {
   ScopedLock lock(m_mutex);
   MaintenanceData *mdata = (MaintenanceData *)arena.alloc(sizeof(MaintenanceData));
+  int64_t key_bytes = 0, value_bytes = 0;
+  size_t cell_count = 0;
+  int64_t mu = 0;
 
   memset(mdata, 0, sizeof(MaintenanceData));
   mdata->ag = this;
@@ -381,29 +373,37 @@ AccessGroup::MaintenanceData *AccessGroup::get_maintenance_data(ByteArena &arena
 
   mdata->latest_stored_revision = m_latest_stored_revision;
 
-  int64_t mu = m_cell_cache->memory_used();
-  mdata->cached_items = m_cell_cache->size();
-  mdata->mem_allocated = m_cell_cache->memory_allocated();
+  if (m_cell_cache) {
+    m_cell_cache->get_counts(&cell_count, &key_bytes, &value_bytes);
+    mu = m_cell_cache->memory_used();
+    mdata->mem_allocated = m_cell_cache->memory_allocated();
+    mdata->mem_used = m_cell_cache->memory_used();
+    mdata->deletes = m_cell_cache->get_delete_count();
+  }
+
+  mdata->cached_items = cell_count;
+  mdata->key_bytes = key_bytes;
+  mdata->value_bytes = value_bytes;
 
   if (m_immutable_cache) {
     mu += m_immutable_cache->memory_used();
-    mdata->immutable_items = m_immutable_cache->size();
+    m_immutable_cache->get_counts(&cell_count, &key_bytes, &value_bytes);
+    mdata->immutable_items = cell_count;
+    mdata->key_bytes += key_bytes;
+    mdata->value_bytes += value_bytes;
     mdata->mem_allocated += m_immutable_cache->memory_allocated();
   }
   else
     mdata->immutable_items = 0;
 
-  mdata->mem_used = mu;
   mdata->compression_ratio = (m_compression_ratio == 0.0) ? 1.0 : m_compression_ratio;
+  mdata->cell_count = mdata->cached_items + mdata->immutable_items;
 
+  mdata->disk_used = m_disk_usage;
   int64_t du = m_in_memory ? 0 : m_disk_usage;
-  mdata->disk_used = du + (int64_t)(m_compression_ratio * (float)mu);
-  if (mdata->disk_used < 0)
-    HT_WARN_OUT << "[Issue 339] Disk usage for " << m_full_name << "=" << mdata->disk_used
-                << HT_END;
+  mdata->disk_estimate = du + (int64_t)(m_compression_ratio * (float)mu);
   mdata->outstanding_scanners = m_outstanding_scanner_count;
   mdata->in_memory = m_in_memory;
-  mdata->deletes = m_cell_cache->get_delete_count();
 
   CellStoreMaintenanceData **tailp = 0;
   mdata->csdata = 0;
@@ -421,11 +421,15 @@ AccessGroup::MaintenanceData *AccessGroup::get_maintenance_data(ByteArena &arena
     m_stores[i].cs->get_index_memory_stats( &(*tailp)->index_stats );
     mdata->block_index_memory += ((*tailp)->index_stats).block_index_memory;
     mdata->bloom_filter_memory += ((*tailp)->index_stats).bloom_filter_memory;
-    mdata->shadow_cache_memory += (*tailp)->shadow_cache_size;
 
     mdata->bloom_filter_accesses += m_stores[i].bloom_filter_accesses;
     mdata->bloom_filter_maybes += m_stores[i].bloom_filter_maybes;
     mdata->bloom_filter_fps += m_stores[i].bloom_filter_fps;
+    if (!m_in_memory) {
+      mdata->cell_count += m_stores[i].cell_count;
+      mdata->key_bytes += m_stores[i].key_bytes;
+      mdata->value_bytes += m_stores[i].value_bytes;
+    }
 
     if (m_stores[i].shadow_cache) {
       (*tailp)->shadow_cache_size = m_stores[i].shadow_cache->memory_allocated();
@@ -439,10 +443,13 @@ AccessGroup::MaintenanceData *AccessGroup::get_maintenance_data(ByteArena &arena
     }
     (*tailp)->maintenance_flags = 0;
     (*tailp)->next = 0;
-  }
 
-  mdata->gc_needed = m_garbage_tracker.check_needed(mdata->deletes, mdata->mem_used,
-                                                    mdata->mem_used, now);
+    mdata->shadow_cache_memory += (*tailp)->shadow_cache_size;
+  }
+  mdata->file_count = m_stores.size();
+
+  mdata->gc_needed = m_garbage_tracker.check_needed(mdata->deletes, mdata->mem_used, now);
+  mdata->needs_merging = m_needs_merging;
 
   mdata->maintenance_flags = 0;
 
@@ -450,21 +457,10 @@ AccessGroup::MaintenanceData *AccessGroup::get_maintenance_data(ByteArena &arena
 }
 
 
-void AccessGroup::add_cell_store(CellStorePtr &cellstore, uint32_t id) {
+void AccessGroup::add_cell_store(CellStorePtr &cellstore) {
   ScopedLock lock(m_mutex);
 
-  // Figure out the "next" CellStore number
-  if (id >= m_next_cs_id)
-    m_next_cs_id = id+1;
-  else if (m_in_memory)
-    return;
-
   m_disk_usage += cellstore->disk_usage();
-  if (m_disk_usage < 0)
-    HT_WARN_OUT << "[Issue 339] Disk usage for " << m_full_name << "=" << m_disk_usage
-                << HT_END;
-
-  m_compression_ratio = cellstore->compression_ratio();
 
   // Record the latest stored revision
   int64_t revision = boost::any_cast<int64_t>
@@ -486,31 +482,28 @@ void AccessGroup::add_cell_store(CellStorePtr &cellstore, uint32_t id) {
   }
 
   m_stores.push_back( cellstore );
+
+  int64_t total_index_entries = 0;
+  recompute_compression_ratio(&total_index_entries);
+
   m_garbage_tracker.accumulate_expirable( m_stores.back().expirable_data );
 
-  m_file_tracker.add_live_noupdate( strip_file_basename(cellstore->get_filename()) );
+  m_file_tracker.add_live_noupdate(cellstore->get_filename(), total_index_entries);
 }
 
-namespace {
-  struct LtCellStoreInfo {
-    bool operator()(const AccessGroup::CellStoreInfo &x, const AccessGroup::CellStoreInfo &y) const {
-      return x.cs->disk_usage() > y.cs->disk_usage();
-    }
-  };
-
-}
-
-void AccessGroup::compute_garbage_stats(int64_t *input_bytesp, int64_t *output_bytesp) {
+void AccessGroup::compute_garbage_stats(uint64_t *input_bytesp, uint64_t *output_bytesp) {
   ScanContextPtr scan_context = new ScanContext(m_schema);
-  MergeScannerPtr mscanner = new MergeScanner(scan_context, false, true);
+  MergeScannerPtr mscanner = new MergeScannerAccessGroup(scan_context);
   ByteString value;
   Key key;
 
-  mscanner->enable_io_accounting();
   mscanner->add_scanner(m_immutable_cache->create_scanner(scan_context));
-  for (size_t i=0; i<m_stores.size(); i++) {
-    HT_ASSERT(m_stores[i].cs);
-    mscanner->add_scanner(m_stores[i].cs->create_scanner(scan_context));
+
+  if (!m_in_memory) {
+    for (size_t i=0; i<m_stores.size(); i++) {
+      HT_ASSERT(m_stores[i].cs);
+      mscanner->add_scanner(m_stores[i].cs->create_scanner(scan_context));
+    }
   }
 
   while (mscanner->get(key, value))
@@ -527,48 +520,58 @@ void AccessGroup::run_compaction(int maintenance_flags) {
   Key key;
   CellListScannerPtr scanner;
   MergeScanner *mscanner = 0;
-  size_t tableidx = 1;
   CellStorePtr cellstore;
   CellCachePtr filtered_cache, shadow_cache;
   String metadata_key_str;
   bool abort_loop = true;
   bool minor = false;
+  bool merging = false;
+  bool major = false;
+  bool gc = false;
   bool garbage_check_performed = false;
+  size_t merge_offset=0, merge_length=0;
+  String added_file;
 
   while (abort_loop) {
     ScopedLock lock(m_mutex);
     if (m_in_memory) {
       if (!m_immutable_cache || m_immutable_cache->empty())
         break;
-      tableidx = m_stores.size();
       HT_INFOF("Starting InMemory Compaction of %s(%s)",
                m_range_name.c_str(), m_name.c_str());
     }
-    else if (MaintenanceFlag::major_compaction(maintenance_flags)) {
+    else if (MaintenanceFlag::major_compaction(maintenance_flags) ||
+             MaintenanceFlag::move_compaction(maintenance_flags)) {
       if ((!m_immutable_cache || m_immutable_cache->empty()) &&
-          m_stores.size() <= (size_t)1)
+          m_stores.size() <= (size_t)1 &&
+          (!MaintenanceFlag::split(maintenance_flags) &&
+           !MaintenanceFlag::move_compaction(maintenance_flags)))
         break;
-      tableidx = 0;
+      major = true;
       HT_INFOF("Starting Major Compaction of %s(%s)",
                m_range_name.c_str(), m_name.c_str());
     }
     else {
-      if (m_stores.size() > (size_t)Global::access_group_max_files) {
-        LtCellStoreInfo descending;
-        sort(m_stores.begin(), m_stores.end(), descending);
-        tableidx = m_stores.size() - Global::access_group_merge_files;
+      if (MaintenanceFlag::merging_compaction(maintenance_flags)) {
+        if (!find_merge_run(&merge_offset, &merge_length)) {
+          m_needs_merging = false;
+          break;
+        }
         HT_INFOF("Starting Merging Compaction of %s(%s)",
                  m_range_name.c_str(), m_name.c_str());
+        merging = true;
+        merge_caches();
       }
       else {
         if (!MaintenanceFlag::gc_compaction(maintenance_flags) &&
             (!m_immutable_cache || m_immutable_cache->empty()))
           break;
-        tableidx = m_stores.size();
-	minor = true;
-        const char *compaction_type = MaintenanceFlag::gc_compaction(maintenance_flags) ? "GC" : "Minor";
-        HT_INFOF("Starting %s Compaction of %s(%s)",
-                 compaction_type, m_range_name.c_str(), m_name.c_str());
+        if (MaintenanceFlag::gc_compaction(maintenance_flags))
+          gc = true;
+        else
+          minor = true;
+        HT_INFOF("Starting %s Compaction of %s(%s)", (gc ? "GC" : "Minor"),
+                 m_range_name.c_str(), m_name.c_str());
       }
     }
     abort_loop = false;
@@ -577,28 +580,12 @@ void AccessGroup::run_compaction(int maintenance_flags) {
   if (abort_loop) {
     ScopedLock lock(m_mutex);
     merge_caches();
-    if (m_earliest_cached_revision_saved != TIMESTAMP_MAX) {
-      m_earliest_cached_revision = m_earliest_cached_revision_saved;
-      m_earliest_cached_revision_saved = TIMESTAMP_MAX;
-    }
     return;
   }
 
   try {
 
-    // TODO: Issue 11
-    char hash_str[33];
-
-    if (m_end_row == "")
-      memset(hash_str, '0', 16);
-    else
-      md5_trunc_modified_base64(m_end_row.c_str(), hash_str);
-
-    hash_str[16] = 0;
-    String cs_file = format("%s/tables/%s/%s/%s/cs%d",
-                            Global::toplevel_dir.c_str(),
-                            m_identifier.id, m_name.c_str(), hash_str,
-                            m_next_cs_id++);
+    String cs_file;
 
     int64_t max_num_entries = 0;
 
@@ -606,55 +593,77 @@ void AccessGroup::run_compaction(int maintenance_flags) {
       ScopedLock lock(m_mutex);
       ScanContextPtr scan_context = new ScanContext(m_schema);
 
-      HT_ASSERT(m_immutable_cache);
+      cs_file = format("%s/tables/%s/%s/%s/cs%d",
+                       Global::toplevel_dir.c_str(),
+                       m_identifier.id, m_name.c_str(),
+                       m_range_dir.c_str(),
+                       m_next_cs_id++);
 
       /**
        * Check for garbage and if threshold reached, change minor to major
        * compaction
        */
-      if (minor && m_garbage_tracker.check_needed( m_immutable_cache->memory_used() )) {
-        int64_t total_bytes, valid_bytes;
-        compute_garbage_stats(&total_bytes, &valid_bytes);
-        garbage_check_performed = true;
-        m_garbage_tracker.set_garbage_stats(total_bytes, valid_bytes);
-        if (m_garbage_tracker.need_collection()) {
-          HT_INFOF("Switching from minor to major compaction to collect %.2f%% garbage",
-                   ((double)(total_bytes-valid_bytes)/(double)total_bytes)*100.00);
-          tableidx=0;
+      if (minor) {
+        if (m_immutable_cache) {
+          if (m_garbage_tracker.check_needed( m_immutable_cache->memory_used() )) {
+            uint64_t total_bytes, valid_bytes;
+            compute_garbage_stats(&total_bytes, &valid_bytes);
+            garbage_check_performed = true;
+            m_garbage_tracker.set_garbage_stats(total_bytes, valid_bytes);
+            if (m_garbage_tracker.need_collection()) {
+              HT_INFOF("Switching from minor to major compaction to collect %.2f%% garbage",
+                       ((double)(total_bytes-valid_bytes)/(double)total_bytes)*100.00);
+              gc = true;
+              minor = false;
+            }
+          }
+        }
+        else {
+          merge_caches();
+          return;
         }
       }
 
-      cellstore = new CellStoreV4(Global::dfs, m_schema.get());
+      cellstore = new CellStoreV5(Global::dfs.get(), m_schema.get());
 
-      max_num_entries = m_immutable_cache->size();
+      max_num_entries = m_immutable_cache ? m_immutable_cache->size() : 0;
 
       if (m_in_memory) {
-        mscanner = new MergeScanner(scan_context, false, true);
+        mscanner = new MergeScannerAccessGroup(scan_context);
         scanner = mscanner;
         mscanner->add_scanner(m_immutable_cache->create_scanner(scan_context));
         filtered_cache = new CellCache();
       }
-      else if (MaintenanceFlag::major_compaction(maintenance_flags) ||
-	       tableidx < m_stores.size()) {
-        bool return_everything = (MaintenanceFlag::major_compaction(maintenance_flags)) ? false : (tableidx > 0);
-        mscanner = new MergeScanner(scan_context, return_everything, true);
-        if (tableidx == 0)
-          mscanner->enable_io_accounting();
+      else if (merging) {
+        mscanner = new MergeScannerAccessGroup(scan_context, true);
         scanner = mscanner;
-        mscanner->add_scanner(m_immutable_cache->create_scanner(scan_context));
-        for (size_t i=tableidx; i<m_stores.size(); i++) {
+        max_num_entries = 0;
+        for (size_t i=merge_offset; i<merge_offset+merge_length; i++) {
           HT_ASSERT(m_stores[i].cs);
           mscanner->add_scanner(m_stores[i].cs->create_scanner(scan_context));
-          max_num_entries += boost::any_cast<int64_t>
-              (m_stores[i].cs->get_trailer()->get("total_entries"));
+          int divisor = (boost::any_cast<uint32_t>(m_stores[i].cs->get_trailer()->get("flags")) & CellStoreTrailerV5::SPLIT) ? 2: 1;
+          max_num_entries += (boost::any_cast<int64_t>
+              (m_stores[i].cs->get_trailer()->get("total_entries")))/divisor;
         }
       }
-      else {
-        scanner = m_immutable_cache->create_scanner(scan_context);
+      else if (major || gc) {
+        mscanner = new MergeScannerAccessGroup(scan_context);
+        scanner = mscanner;
+        if (m_immutable_cache)
+          mscanner->add_scanner(m_immutable_cache->create_scanner(scan_context));
+        for (size_t i=0; i<m_stores.size(); i++) {
+          HT_ASSERT(m_stores[i].cs);
+          mscanner->add_scanner(m_stores[i].cs->create_scanner(scan_context));
+          int divisor = (boost::any_cast<uint32_t>(m_stores[i].cs->get_trailer()->get("flags")) & CellStoreTrailerV5::SPLIT) ? 2: 1;
+          max_num_entries += (boost::any_cast<int64_t>
+              (m_stores[i].cs->get_trailer()->get("total_entries")))/divisor;
+        }
       }
+      else
+        scanner = m_immutable_cache->create_scanner(scan_context);
     }
 
-    cellstore->create(cs_file.c_str(), max_num_entries, m_cellstore_props);
+    cellstore->create(cs_file.c_str(), max_num_entries, m_cellstore_props, &m_identifier);
 
     while (scanner->get(key, value)) {
       cellstore->add(key, value);
@@ -663,105 +672,117 @@ void AccessGroup::run_compaction(int maintenance_flags) {
       scanner->forward();
     }
 
-    if (tableidx == 0 && mscanner) {
-      CellStoreTrailerV4 *trailer = dynamic_cast<CellStoreTrailerV4 *>(cellstore->get_trailer());
-      if (trailer)
-        trailer->flags |= CellStoreTrailerV4::MAJOR_COMPACTION;
-    }
+    CellStoreTrailerV5 *trailer = dynamic_cast<CellStoreTrailerV5 *>(cellstore->get_trailer());
+
+    if (major && mscanner)
+      trailer->flags |= CellStoreTrailerV5::MAJOR_COMPACTION;
+
+    if (maintenance_flags & MaintenanceFlag::SPLIT)
+      trailer->flags |= CellStoreTrailerV5::SPLIT;
 
     cellstore->finalize(&m_identifier);
 
     /**
      * Install new CellCache and CellStore and update Live file tracker
      */
+    std::vector<String> removed_files;
+    int64_t total_index_entries = 0;
     {
       ScopedLock lock(m_mutex);
 
-      /**
-       * If major compaction was performed and we didn't do a garbage
-       * check, then update the garbage tracker with statistics from
-       * the MergeScanner.  Also clear the garbage tracker.
-       */
-      if (tableidx == 0 && mscanner) {
-        if (!garbage_check_performed) {
-          int64_t input_bytes, output_bytes;
-          mscanner->get_io_accounting_data(&input_bytes, &output_bytes);
-          m_garbage_tracker.set_garbage_stats(input_bytes, output_bytes);
-        }
-        m_garbage_tracker.clear();
-      }
-
-      m_latest_stored_revision = boost::any_cast<int64_t>
-        (cellstore->get_trailer()->get("revision"));
-      if (m_latest_stored_revision >= m_earliest_cached_revision)
-        HT_ERROR("Revision (clock) skew detected! May result in data loss.");
-
-      m_file_tracker.clear_live();
-
-      if (m_in_memory) {
-        m_immutable_cache = filtered_cache;
-        merge_caches();
-        m_stores.clear();
+      if (merging) {
+        std::vector<CellStoreInfo> new_stores;
+        new_stores.reserve(m_stores.size() - (merge_length-1));
+        for (size_t i=0; i<merge_offset; i++)
+          new_stores.push_back(m_stores[i]);
+        for (size_t i=merge_offset; i<merge_offset+merge_length; i++)
+          removed_files.push_back(m_stores[i].cs->get_filename());
+        new_stores.push_back(cellstore);
+        added_file = cellstore->get_filename();
+        for (size_t i=merge_offset+merge_length; i<m_stores.size(); i++)
+          new_stores.push_back(m_stores[i]);
+        m_stores.swap(new_stores);
       }
       else {
 
-        for (size_t i=0; i<tableidx; i++)
-          m_file_tracker.add_live( strip_file_basename(m_stores[i].cs->get_filename()) );
-
-	if (minor && Global::enable_shadow_cache &&
-	    !MaintenanceFlag::purge_shadow_cache(maintenance_flags))
-	  shadow_cache = m_immutable_cache;
-	m_immutable_cache = 0;
-
-        /** Drop the compacted tables from the table vector **/
-        if (tableidx < m_stores.size())
-          m_stores.resize(tableidx);
-      }
-
-      /** Add the new cell store to the table vector, or delete it if
-       * it contains no entries
-       */
-      if (cellstore->get_total_entries() > 0) {
-        m_stores.push_back( CellStoreInfo(cellstore, shadow_cache, m_earliest_cached_revision_saved) );
-        m_garbage_tracker.accumulate_expirable( m_stores.back().expirable_data );
-        m_file_tracker.add_live( strip_file_basename(cellstore->get_filename()) );
-      }
-      else {
-        String fname = cellstore->get_filename();
-        cellstore = 0;
-        try {
-          Global::dfs->remove(fname);
+        /**
+         * If major compaction was performed and we didn't do a garbage
+         * check, then update the garbage tracker with statistics from
+         * the MergeScanner.  Also clear the garbage tracker.
+         */
+        if ((major || gc) && mscanner) {
+          if (!garbage_check_performed) {
+            uint64_t input_bytes, output_bytes;
+            mscanner->get_io_accounting_data(&input_bytes, &output_bytes);
+            m_garbage_tracker.set_garbage_stats(input_bytes, output_bytes);
+          }
+          m_garbage_tracker.clear();
         }
-        catch (Hypertable::Exception &e) {
-          HT_ERROR_OUT << "Problem removing '" << fname.c_str() << "' " \
-                       << e << HT_END;
+        else if (m_in_memory)
+          m_garbage_tracker.clear();
+
+        m_latest_stored_revision = boost::any_cast<int64_t>
+          (cellstore->get_trailer()->get("revision"));
+        if (m_latest_stored_revision >= m_earliest_cached_revision)
+          HT_ERROR("Revision (clock) skew detected! May result in data loss.");
+
+        if (m_in_memory) {
+          m_immutable_cache = filtered_cache;
+          merge_caches(false);
+          for (size_t i=0; i<m_stores.size(); i++)
+            removed_files.push_back(m_stores[i].cs->get_filename());
+          m_stores.clear();
+        }
+        else {
+
+          if (minor && Global::enable_shadow_cache &&
+              !MaintenanceFlag::purge_shadow_cache(maintenance_flags))
+            shadow_cache = m_immutable_cache;
+          m_immutable_cache = 0;
+
+          /** Drop the compacted CellStores from the stores vector **/
+          if (major || gc) {
+            for (size_t i=0; i<m_stores.size(); i++)
+              removed_files.push_back(m_stores[i].cs->get_filename());
+            m_stores.clear();
+          }
+        }
+
+        /** Add the new cell store to the table vector, or delete it if
+         * it contains no entries
+         */
+        if (cellstore->get_total_entries() > 0) {
+          m_stores.push_back( CellStoreInfo(cellstore, shadow_cache, m_earliest_cached_revision_saved) );
+          m_needs_merging = needs_merging();
+          m_garbage_tracker.accumulate_expirable( m_stores.back().expirable_data );
+          added_file = cellstore->get_filename();
+        }
+        else {
+          String fname = cellstore->get_filename();
+          cellstore = 0;
+          try {
+            Global::dfs->remove(fname);
+          }
+          catch (Hypertable::Exception &e) {
+            HT_ERROR_OUT << "Problem removing '" << fname.c_str() << "' " \
+                         << e << HT_END;
+          }
         }
       }
 
-      /** Re-compute disk usage and compresion ratio**/
-      m_disk_usage = 0;
-      m_compression_ratio = 0.0;
-      for (size_t i=0; i<m_stores.size(); i++) {
-        HT_ASSERT(m_stores[i].cs);
-        double disk_usage = m_stores[i].cs->disk_usage();
-        m_disk_usage += (uint64_t)disk_usage;
-        m_compression_ratio += m_stores[i].cs->compression_ratio() * disk_usage;
-      }
-      if (m_disk_usage < 0)
-        HT_WARN_OUT << "[Issue 339] Disk usage for " << m_full_name << "=" << m_disk_usage
-                    << HT_END;
-      if (m_disk_usage != 0)
-        m_compression_ratio /= m_disk_usage;
-      else
-        m_compression_ratio = 0.0;
+      recompute_compression_ratio(&total_index_entries);
     }
 
+    m_file_tracker.update_live(added_file, removed_files, m_next_cs_id, total_index_entries);
     m_file_tracker.update_files_column();
 
-    m_earliest_cached_revision_saved = TIMESTAMP_MAX;
+    if (merging)
+      m_needs_merging = find_merge_run();
+    else
+      m_earliest_cached_revision_saved = TIMESTAMP_MAX;
 
-    HT_INFOF("Finished Compaction of %s(%s)", m_range_name.c_str(),
-             m_name.c_str());
+    HT_INFOF("Finished Compaction of %s(%s) to %s", m_range_name.c_str(),
+             m_name.c_str(), added_file.c_str());
 
   }
   catch (Exception &e) {
@@ -800,7 +821,7 @@ void AccessGroup::shrink(String &split_row, bool drop_high) {
 
     if (drop_high) {
       m_end_row = split_row;
-      m_next_cs_id = 0;
+      range_dir_initialize();
     }
     else
       m_start_row = split_row;
@@ -815,33 +836,36 @@ void AccessGroup::shrink(String &split_row, bool drop_high) {
 
     m_cell_cache = new_cell_cache;
 
-    cell_cache_scanner = old_cell_cache->create_scanner(scan_context);
+    if (old_cell_cache) {
 
-    /**
-     * Shrink the CellCache
-     */
-    while (cell_cache_scanner->get(key_comps, value)) {
+      cell_cache_scanner = old_cell_cache->create_scanner(scan_context);
 
-      cmp = strcmp(key_comps.row, split_row.c_str());
+      /**
+       * Shrink the CellCache
+       */
+      while (cell_cache_scanner->get(key_comps, value)) {
 
-      if ((cmp > 0 && !drop_high) || (cmp <= 0 && drop_high)) {
-        /*
-         * For IN_MEMORY access groups, record earliest cached
-         * revision that is > latest_stored.  For normal access groups,
-         * record absolute earliest cached revision
-         */
-        if (m_in_memory) {
-          if (key_comps.revision > m_latest_stored_revision &&
-              key_comps.revision < m_earliest_cached_revision)
+        cmp = strcmp(key_comps.row, split_row.c_str());
+
+        if ((cmp > 0 && !drop_high) || (cmp <= 0 && drop_high)) {
+          /*
+           * For IN_MEMORY access groups, record earliest cached
+           * revision that is > latest_stored.  For normal access groups,
+           * record absolute earliest cached revision
+           */
+          if (m_in_memory) {
+            if (key_comps.revision > m_latest_stored_revision &&
+                key_comps.revision < m_earliest_cached_revision)
+              m_earliest_cached_revision = key_comps.revision;
+          }
+          else if (key_comps.revision < m_earliest_cached_revision)
             m_earliest_cached_revision = key_comps.revision;
+          add(key_comps, value);
+          memory_added += key.length() + value.length();
+          items_added++;
         }
-        else if (key_comps.revision < m_earliest_cached_revision)
-          m_earliest_cached_revision = key_comps.revision;
-        add(key_comps, value);
-        memory_added += key.length() + value.length();
-        items_added++;
+        cell_cache_scanner->forward();
       }
-      cell_cache_scanner->forward();
     }
 
     new_cell_cache->unlock();
@@ -849,18 +873,15 @@ void AccessGroup::shrink(String &split_row, bool drop_high) {
     /**
      * Shrink the CellStores
      */
-    m_disk_usage = 0;
     for (size_t i=0; i<m_stores.size(); i++) {
       String filename = m_stores[i].cs->get_filename();
       new_cell_store = CellStoreFactory::open(filename, m_start_row.c_str(), m_end_row.c_str());
-      m_disk_usage += new_cell_store->disk_usage();
-      if (m_disk_usage < 0)
-        HT_WARN_OUT << "[Issue 339] Disk usage for " << m_full_name << " file=" << filename
-                    << "=" << m_disk_usage << HT_END;
       new_stores.push_back( new_cell_store );
     }
 
     m_stores = new_stores;
+
+    m_needs_merging = find_merge_run();
 
     m_earliest_cached_revision_saved = TIMESTAMP_MAX;
 
@@ -871,7 +892,7 @@ void AccessGroup::shrink(String &split_row, bool drop_high) {
     m_cell_cache = old_cell_cache;
     m_earliest_cached_revision = m_earliest_cached_revision_saved;
     m_earliest_cached_revision_saved = TIMESTAMP_MAX;
-    HT_THROW2(e.code(), e, "shrink failed");
+    throw;
   }
 }
 
@@ -892,13 +913,14 @@ void AccessGroup::release_files(const std::vector<String> &files) {
 
 void AccessGroup::stage_compaction() {
   ScopedLock lock(m_mutex);
+  if (!m_cell_cache)
+    return;
   HT_ASSERT(!m_immutable_cache);
   m_immutable_cache = m_cell_cache;
   m_immutable_cache->freeze();
   m_garbage_tracker.add_delete_count( m_immutable_cache->get_delete_count() );
-  HT_INFOF("Adding %d deletes", m_immutable_cache->get_delete_count());
   m_garbage_tracker.accumulate_data( m_immutable_cache->memory_used() );
-  m_cell_cache = new CellCache();
+  m_cell_cache = 0;
   m_earliest_cached_revision_saved = m_earliest_cached_revision;
   m_earliest_cached_revision = TIMESTAMP_MAX;
 }
@@ -909,25 +931,19 @@ void AccessGroup::unstage_compaction() {
   m_garbage_tracker.add_delete_count( -m_immutable_cache->get_delete_count() );
   m_garbage_tracker.accumulate_data( -m_immutable_cache->memory_used() );
   merge_caches();
-  if (m_earliest_cached_revision_saved != TIMESTAMP_MAX) {
-    m_earliest_cached_revision = m_earliest_cached_revision_saved;
-    m_earliest_cached_revision_saved = TIMESTAMP_MAX;
-  }
 }
-
-
-String AccessGroup::strip_file_basename(const String &fname) {
-  size_t basename_len = m_file_basename.length();
-  HT_ASSERT(!strncmp(fname.c_str(), m_file_basename.c_str(), basename_len));
-  return fname.substr(basename_len);
-}
-
 
 
 /**
  * Assumes mutex is locked
  */
-void AccessGroup::merge_caches() {
+void AccessGroup::merge_caches(bool reset_earliest_cached_revision) {
+
+  if (reset_earliest_cached_revision &&
+      m_earliest_cached_revision_saved != TIMESTAMP_MAX) {
+    m_earliest_cached_revision = m_earliest_cached_revision_saved;
+    m_earliest_cached_revision_saved = TIMESTAMP_MAX;
+  }
 
   if (!m_immutable_cache)
     return;
@@ -936,7 +952,7 @@ void AccessGroup::merge_caches() {
     m_immutable_cache = 0;
     return;
   }
-  else if (m_cell_cache->size() == 0) {
+  else if (!m_cell_cache || m_cell_cache->size() == 0) {
     m_cell_cache = m_immutable_cache;
     m_cell_cache->unfreeze();
     m_immutable_cache = 0;
@@ -962,6 +978,187 @@ void AccessGroup::merge_caches() {
   m_immutable_cache = 0;
   m_cell_cache = merged_cache;
 }
+
+extern "C" {
+#include <unistd.h>
+}
+
+void AccessGroup::range_dir_initialize() {
+  char hash_str[33];
+  if (m_end_row == "")
+    memset(hash_str, '0', 16);
+  else
+    md5_trunc_modified_base64(m_end_row.c_str(), hash_str);
+  hash_str[16] = 0;
+  m_range_dir = hash_str;
+
+  String abs_range_dir = format("%s/tables/%s/%s/%s",
+                                Global::toplevel_dir.c_str(),
+                                m_identifier.id, m_name.c_str(),
+                                m_range_dir.c_str());
+
+  m_next_cs_id = 0;
+
+  try {
+    if (!Global::dfs->exists(abs_range_dir))
+      Global::dfs->mkdirs(abs_range_dir);
+    else {
+      uint32_t id;
+      vector<String> listing;
+      Global::dfs->readdir(abs_range_dir, listing);
+      for (size_t i=0; i<listing.size(); i++) {
+        const char *fname = listing[i].c_str();
+        if (!strncmp(fname, "cs", 2)) {
+          id = atoi(&fname[2]);
+          if (id >= m_next_cs_id)
+            m_next_cs_id = id+1;
+        }
+      }
+    }
+  }
+  catch (Exception &e) {
+    HT_FATAL_OUT << e << HT_END;
+  }
+
+  /**
+  HT_INFOF("Just initialized %s[%s..%s](%s) (pid=%d) to ID %u",
+           m_table_name.c_str(), m_start_row.c_str(),
+           m_end_row.c_str(), m_name.c_str(), (int)getpid(), (unsigned)m_next_cs_id);
+  */
+
+}
+
+void AccessGroup::recompute_compression_ratio(int64_t *total_index_entriesp) {
+  m_disk_usage = 0;
+  m_compression_ratio = 0.0;
+  if (total_index_entriesp)
+    *total_index_entriesp = 0;
+  for (size_t i=0; i<m_stores.size(); i++) {
+    HT_ASSERT(m_stores[i].cs);
+    if (total_index_entriesp)
+      *total_index_entriesp += (int64_t)m_stores[i].index_entries;
+    double disk_usage = m_stores[i].cs->disk_usage();
+    m_disk_usage += (uint64_t)disk_usage;
+    m_compression_ratio += disk_usage / m_stores[i].cs->compression_ratio();
+  }
+  if (m_disk_usage != 0)
+    m_compression_ratio = (double)m_disk_usage / m_compression_ratio;
+  else
+    m_compression_ratio = 1.0;
+}
+
+
+bool AccessGroup::find_merge_run(size_t *indexp, size_t *lenp) {
+  size_t index = 0;
+  size_t count = 0;
+  size_t i = 0;
+  int64_t running_total = 0;
+
+  if (m_in_memory || m_stores.size() == 0)
+    return false;
+
+  do {
+    count++;
+    running_total += m_stores[i].cs->disk_usage();
+
+    if (running_total >= Global::cellstore_target_size_max) {
+      if (count > (size_t)Global::merge_cellstore_run_length_threshold) {
+        if (indexp)
+          *indexp = index;
+        if (lenp)
+           *lenp = count-1;
+        return true;
+      }
+      index = i+1;
+      count = 0;
+      running_total = 0;
+    }
+    else if (running_total >= Global::cellstore_target_size_min &&
+             count > 1) {
+      if (indexp)
+        *indexp = index;
+      if (lenp)
+        *lenp = count;
+      return true;
+    }
+    i++;
+  } while (i < m_stores.size());
+
+  if (count > (size_t)Global::merge_cellstore_run_length_threshold) {
+    if (indexp)
+      *indexp = index;
+    if (lenp)
+      *lenp = count;
+    return true;
+  }
+
+  return false;
+}
+
+
+bool AccessGroup::needs_merging() {
+  size_t count = 0;
+  int i = 0;
+  int64_t running_total = 0;
+
+  if (m_in_memory || m_stores.size() == 0)
+    return false;
+
+  for (i = m_stores.size()-1; i>=0; i--) {
+    count++;
+    running_total += m_stores[i].cs->disk_usage();
+    if (running_total >= Global::cellstore_target_size_max)
+      break;
+    else if (running_total >= Global::cellstore_target_size_min &&
+             (m_stores.size() - i) > 1)
+      return true;
+  }
+
+  if (i < 0 && count > (size_t)Global::merge_cellstore_run_length_threshold)
+    return true;
+
+  /** Search from the beginning **/
+
+  i = 0;
+  count = 0;
+  running_total = 0;
+  do {
+    count++;
+    running_total += m_stores[i].cs->disk_usage();
+
+    if (running_total >= Global::cellstore_target_size_max) {
+      if (count > (size_t)Global::merge_cellstore_run_length_threshold)
+        return true;
+      count = 0;
+      running_total = 0;
+    }
+    else if (running_total >= Global::cellstore_target_size_min &&
+             count > 1) {
+      return true;
+    }
+    i++;
+  } while (i < (int)m_stores.size());
+
+  if (count > (size_t)Global::merge_cellstore_run_length_threshold)
+    return true;
+
+  return false;
+}
+
+namespace {
+  struct LtCellStoreInfoTimestamp {
+    bool operator()(const CellStoreInfo &x, const CellStoreInfo &y) const {
+      return x.timestamp_min < y.timestamp_min;
+    }
+  };
+}
+
+
+void AccessGroup::sort_cellstores_by_timestamp() {
+  LtCellStoreInfoTimestamp order;
+  sort(m_stores.begin(), m_stores.end(), order);
+}
+
 
 void AccessGroup::dump_keys(std::ofstream &out) {
   ScopedLock lock(m_mutex);
@@ -991,4 +1188,36 @@ void AccessGroup::dump_keys(std::ofstream &out) {
 	<< " ts=" << (*iter).timestamp
 	<< " rev=" << (*iter).revision << "\n";
   }
+}
+
+
+std::ostream &Hypertable::operator<<(std::ostream &os, const AccessGroup::MaintenanceData &mdata) {
+  os << "ACCESS GROUP " << mdata.ag->get_full_name() << "\n";
+  os << "earliest_cached_revision=" << mdata.earliest_cached_revision << "\n";
+  os << "latest_stored_revision=" << mdata.latest_stored_revision << "\n";
+  os << "mem_used=" << mdata.mem_used << "\n";
+  os << "mem_allocated=" << mdata.mem_allocated << "\n";
+  os << "cached_items=" << mdata.cached_items << "\n";
+  os << "cell_count=" << mdata.cell_count << "\n";
+  os << "immutable_items=" << mdata.immutable_items << "\n";
+  os << "disk_used=" << mdata.disk_used << "\n";
+  os << "disk_estimate=" << mdata.disk_estimate << "\n";
+  os << "log_space_pinned=" << mdata.log_space_pinned << "\n";
+  os << "key_bytes=" << mdata.key_bytes << "\n";
+  os << "value_bytes=" << mdata.value_bytes << "\n";
+  os << "file_count=" << mdata.file_count << "\n";
+  os << "deletes=" << mdata.deletes << "\n";
+  os << "outstanding_scanners=" << mdata.outstanding_scanners << "\n";
+  os << "compression_ratio=" << mdata.compression_ratio << "\n";
+  os << "maintenance_flags=" << mdata.maintenance_flags << "\n";
+  os << "block_index_memory=" << mdata.block_index_memory << "\n";
+  os << "bloom_filter_memory=" << mdata.bloom_filter_memory << "\n";
+  os << "bloom_filter_accesses=" << mdata.bloom_filter_accesses << "\n";
+  os << "bloom_filter_maybes=" << mdata.bloom_filter_maybes << "\n";
+  os << "bloom_filter_fps=" << mdata.bloom_filter_fps << "\n";
+  os << "shadow_cache_memory=" << mdata.shadow_cache_memory << "\n";
+  os << "in_memory=" << (mdata.in_memory ? "true" : "false") << "\n";
+  os << "gc_needed=" << (mdata.gc_needed ? "true" : "false") << "\n";
+  os << "needs_merging=" << (mdata.needs_merging ? "true" : "false") << "\n";
+  return os;
 }

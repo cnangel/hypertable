@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -31,6 +31,8 @@
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/iostreams/filter/gzip.hpp>
 #include <boost/shared_array.hpp>
+#include <boost/spirit/include/classic_core.hpp>
+#include <boost/spirit/include/classic_assign_actor.hpp>
 
 extern "C" {
 #include <strings.h>
@@ -51,6 +53,7 @@ extern "C" {
 #include "LoadDataSource.h"
 
 using namespace boost::iostreams;
+using namespace boost::spirit::classic;
 using namespace Hypertable;
 using namespace std;
 
@@ -58,13 +61,16 @@ using namespace std;
 /**
  *
  */
-LoadDataSource::LoadDataSource(const String &header_fname, int row_uniquify_chars, int load_flags)
+LoadDataSource::LoadDataSource(const String &header_fname, 
+                               int row_uniquify_chars, 
+                               int load_flags)
   : m_type_mask(0), m_cur_line(0), m_line_buffer(0),
     m_row_key_buffer(0), m_hyperformat(false), m_leading_timestamps(false),
     m_timestamp_index(-1), m_timestamp(AUTO_ASSIGN), m_offset(0),
     m_zipped(false), m_rsgen(0), m_header_fname(header_fname),
     m_row_uniquify_chars(row_uniquify_chars),
-    m_load_flags(load_flags), m_first_line_cached(false), m_source_size(0) {
+    m_load_flags(load_flags), m_first_line_cached(false), m_source_size(0) 
+{
   if (row_uniquify_chars)
     m_rsgen = new FixedRandomStringGenerator(row_uniquify_chars);
 
@@ -92,21 +98,21 @@ LoadDataSource::get_header()
     getline(m_fin, m_first_line);
     for (const char *ptr = m_first_line.c_str(); *ptr; ptr++) {
       if (*ptr == '\t')
-	tabs++;
+        tabs++;
     }
     if (tabs == 2) {
       if (strcmp(m_first_line.c_str(), "#row\tcolumn\tvalue"))
-	m_first_line_cached = true;
+        m_first_line_cached = true;
       header = "#row\tcolumn\tvalue";
     }
     else if (tabs == 3) {
       if (strcmp(m_first_line.c_str(), "#timestamp\trow\tcolumn\tvalue"))
-	m_first_line_cached = true;
+        m_first_line_cached = true;
       header = "#timestamp\trow\tcolumn\tvalue";
     }
     else
       HT_THROWF(Error::HQL_BAD_LOAD_FILE_FORMAT,
-		"Untable to autodetect format, expected 2 or 3 tabs, got %d", (int)tabs);
+                "Untable to autodetect format, expected 2 or 3 tabs, got %d", (int)tabs);
   }
   else {
     // autodetect
@@ -116,16 +122,17 @@ LoadDataSource::get_header()
     else {
       size_t tabs = 0;
       for (const char *ptr = m_first_line.c_str(); *ptr; ptr++) {
-	       if (*ptr == '\t')
-	         tabs++;
+        if (*ptr == '\t')
+          tabs++;
       }
       if (tabs == 2)
-	       header = "#row\tcolumn\tvalue";
+        header = "#row\tcolumn\tvalue";
       else if (tabs == 3)
-	       header = "#timestamp\trow\tcolumn\tvalue";
+        header = "#timestamp\trow\tcolumn\tvalue";
       else
-	       HT_THROWF(Error::HQL_BAD_LOAD_FILE_FORMAT,
-		          "Untable to autodetect format, expected 2 or 3 tabs, got %d", (int)tabs);
+        HT_THROWF(Error::HQL_BAD_LOAD_FILE_FORMAT,
+                  "Untable to autodetect format, expected 2 or 3 tabs, "
+                  "got %d", (int)tabs);
         m_first_line_cached = true;
     }
   }
@@ -143,9 +150,10 @@ LoadDataSource::init(const std::vector<String> &key_columns, const String &times
 }
 
 void
-LoadDataSource::parse_header(const String &header, const std::vector<String> &key_columns,
-                             const String &timestamp_column) {
-
+LoadDataSource::parse_header(const String &header, 
+                             const std::vector<String> &key_columns,
+                             const String &timestamp_column) 
+{
   String line, column_name;
   char *base, *ptr, *colon_ptr;
   int index = 0;
@@ -288,14 +296,12 @@ LoadDataSource::parse_header(const String &header, const std::vector<String> &ke
  *
  */
 bool
-LoadDataSource::next(uint32_t *type_flagp, KeySpec *keyp,
-    uint8_t **valuep, uint32_t *value_lenp, uint32_t *consumedp) {
+LoadDataSource::next(KeySpec *keyp, uint8_t **valuep, uint32_t *value_lenp,
+                     bool *is_deletep, uint32_t *consumedp) 
+{
   String line;
   int index;
   char *base, *ptr, *colon;
-
-  if (type_flagp)
-    *type_flagp = FLAG_INSERT;
 
   if (consumedp)
     *consumedp = 0;
@@ -357,6 +363,12 @@ LoadDataSource::next(uint32_t *type_flagp, KeySpec *keyp,
         keyp->row = base;
         keyp->row_len = ptr - base;
       }
+      if (keyp->row_len == 0) {
+        cerr << "warning: zero-lengthed row key on line " 
+             << m_cur_line << ", skipping..." 
+             << endl;
+        continue;
+      }
       *ptr++ = 0;
       base = ptr;
 
@@ -371,7 +383,6 @@ LoadDataSource::next(uint32_t *type_flagp, KeySpec *keyp,
 
       if ((colon = strchr(base, ':')) != 0) {
         *colon++ = 0;
-        keyp->column_family = base;
         if (colon < ptr) {
           keyp->column_qualifier = colon;
           keyp->column_qualifier_len = ptr - colon;
@@ -385,14 +396,41 @@ LoadDataSource::next(uint32_t *type_flagp, KeySpec *keyp,
         keyp->column_qualifier = 0;
         keyp->column_qualifier_len = 0;
       }
-      keyp->column_family = base;
+      keyp->column_family = *base ? base : 0;
       ptr++;
 
       /**
        * Get value
        */
-      *valuep = (uint8_t *)ptr;
-      *value_lenp = strlen(ptr);
+      base = ptr;
+      *valuep = (uint8_t *)base;
+      if ((ptr = strchr(base, '\t')) == 0) {
+        *value_lenp = strlen((char *)*valuep);
+        *is_deletep = false;
+      }
+      else {
+        *value_lenp = ptr-base;
+        *ptr++ = 0;
+        if (!strncmp(ptr, "DELETE", 6)) {
+          if (keyp->column_family == 0)
+            keyp->flag = FLAG_DELETE_ROW;
+          else {
+            if (!m_leading_timestamps)
+              keyp->flag = FLAG_DELETE_COLUMN_FAMILY;
+            else
+              keyp->flag = FLAG_DELETE_CELL;
+          }
+          *is_deletep = true;
+        }
+        else if (!strncmp(ptr, "DELETE_VERSION", 6) && keyp->column_family) {
+          keyp->flag = FLAG_DELETE_CELL_VERSION;
+          *is_deletep = true;
+        }
+        else {
+          cerr << "warning: too many fields on line " << m_cur_line << endl;
+          *is_deletep = false;
+        }
+      }
 
       if (m_zipped && consumedp) {
         *consumedp = incr_consumed();
@@ -403,10 +441,16 @@ LoadDataSource::next(uint32_t *type_flagp, KeySpec *keyp,
   }
   else {
 
+    *is_deletep = false;
+
     // skip timestamp and rowkey (if needed)
-    while (m_next_value < m_limit &&
-           should_skip(m_next_value, m_type_mask))
-      m_next_value++;
+    // issue 720: do not insert NULL values
+    while (m_next_value < m_limit) {
+      if (should_skip(m_next_value, m_type_mask) || !m_values[m_next_value])
+        m_next_value++;
+      else
+        break;
+    }
 
     // get from parsed cells if available
     if (m_next_value > 0 && m_next_value < m_limit) {
@@ -572,9 +616,8 @@ LoadDataSource::next(uint32_t *type_flagp, KeySpec *keyp,
   return false;
 }
 
-
-
-bool LoadDataSource::add_row_component(int index) {
+bool LoadDataSource::add_row_component(int index) 
+{
   const char *value = m_values[m_key_comps[index].index];
   size_t value_len = 0;
 
@@ -613,14 +656,15 @@ bool LoadDataSource::add_row_component(int index) {
 
 }
 
-bool LoadDataSource::parse_date_format(const char *str, int64_t &timestamp) {
+bool LoadDataSource::parse_date_format(const char *str, int64_t &timestamp) 
+{
   int ival;
-  double dval=0;
   const char *ptr = str;
   char *end_ptr;
   struct tm tm;
   time_t tt;
   int64_t ns;
+  int64_t sec;
 
   ns = (int64_t)strtoll(ptr, &end_ptr, 10);
   if (*end_ptr == 0) {
@@ -677,7 +721,9 @@ bool LoadDataSource::parse_date_format(const char *str, int64_t &timestamp) {
   /**
    * second
    */
-  dval = strtod(ptr, &end_ptr);
+
+  if(!parse_sec(ptr, &end_ptr, sec))
+    return false;
   tm.tm_sec = 0;
 
 #if !defined(__sun__)
@@ -694,7 +740,22 @@ bool LoadDataSource::parse_date_format(const char *str, int64_t &timestamp) {
     ns = strtoul(ptr, &end_ptr, 10);
   }
 
-  timestamp = (int64_t)(((double)tt + dval) * 1000000000LL) + ns;
+  timestamp = ((int64_t)tt * 1000000000LL) + sec + ns;
 
   return true;
+}
+
+bool LoadDataSource::parse_sec(const char *str, char **end_ptr, int64_t &ns) 
+{
+  uint_parser<unsigned int, 10, 2, 2> uint2_p;
+  int64_t int_seconds=0;
+  double decimal_seconds=0;
+  *end_ptr = (char*) str;
+  parse_info<> info = parse(str,
+      (uint2_p[assign_a(int_seconds)] >> !real_p[assign_a(decimal_seconds)]));
+  ns =  (int64_t)int_seconds * 1000000000LL + (int64_t)(decimal_seconds *
+      ((double) 1000000000LL));
+  if (info.hit)
+    *end_ptr += info.length - 1 ;
+  return info.hit;
 }

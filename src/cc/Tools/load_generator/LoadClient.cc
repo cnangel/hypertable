@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2010 Sanjit Jhala (Hypertable, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -103,7 +103,7 @@ LoadClient::set_cells(const Cells &cells)
           string((const char*)cell.value, cell.value_len), cell.timestamp, cell.revision,
           (ThriftGen::KeyFlag::type) cell.flag));
     }
-    m_thrift_client->set_cells(m_thrift_mutator, thrift_cells);
+    m_thrift_client->mutator_set_cells(m_thrift_mutator, thrift_cells);
 #endif
   }
   else {
@@ -130,7 +130,7 @@ LoadClient::set_delete(const KeySpec &key) {
         key.column_family, key.column_qualifier, std::string(""),
         key.timestamp, key.revision, flag));
 
-    m_thrift_client->set_cells(m_thrift_mutator, thrift_cells);
+    m_thrift_client->mutator_set_cells(m_thrift_mutator, thrift_cells);
 #endif
   }
   else {
@@ -172,7 +172,7 @@ LoadClient::create_scanner(const String &tablename, const ScanSpec &scan_spec)
     thrift_scan_spec.__isset.columns = thrift_scan_spec.__isset.row_intervals = true;
 
     m_thrift_scanner = m_thrift_client->open_scanner(m_thrift_namespace, tablename,
-                                                     thrift_scan_spec, true);
+                                                     thrift_scan_spec);
 #endif
   }
   else {

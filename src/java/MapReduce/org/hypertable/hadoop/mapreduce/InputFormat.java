@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2010 Doug Judd (Hypertable, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -106,8 +106,8 @@ extends org.apache.hadoop.mapreduce.InputFormat<KeyWritable, BytesWritable> {
         TaskAttemptContext context) throws IOException,
         InterruptedException {
       try {
-        m_ns = m_client.open_namespace(m_namespace);
-        m_scanner = m_client.open_scanner(m_ns, m_tablename, m_scan_spec, true);
+        m_ns = m_client.namespace_open(m_namespace);
+        m_scanner = m_client.scanner_open(m_ns, m_tablename, m_scan_spec);
       }
       catch (TTransportException e) {
         e.printStackTrace();
@@ -131,8 +131,8 @@ extends org.apache.hadoop.mapreduce.InputFormat<KeyWritable, BytesWritable> {
     @Override
     public void close() {
       try {
-        m_client.close_scanner(m_scanner);
-        m_client.close_namespace(m_ns);
+        m_client.scanner_close(m_scanner);
+        m_client.namespace_close(m_ns);
       }
       catch (Exception e) {
         e.printStackTrace();
@@ -194,7 +194,7 @@ extends org.apache.hadoop.mapreduce.InputFormat<KeyWritable, BytesWritable> {
         if (m_eos)
           return false;
         if (m_cells == null || !m_iter.hasNext()) {
-          m_cells = m_client.next_cells(m_scanner);
+          m_cells = m_client.scanner_get_cells(m_scanner);
           if (m_cells.isEmpty()) {
             m_eos = true;
             return false;
@@ -278,7 +278,7 @@ extends org.apache.hadoop.mapreduce.InputFormat<KeyWritable, BytesWritable> {
 
   /**
    * Calculates the splits that will serve as input for the map tasks. The
-   * number of splits matches the number of regions in a table.
+   * number of splits matches the number of ranges in a table.
    *
    * @param context  The current job context.
    * @return The list of input splits.
@@ -291,22 +291,41 @@ extends org.apache.hadoop.mapreduce.InputFormat<KeyWritable, BytesWritable> {
 
     long ns=0;
     try {
+      RowInterval ri = null;
+
       if (m_client == null)
         m_client = ThriftClient.create("localhost", 38080);
+
+      if (m_base_spec == null)
+        m_base_spec = ScanSpec.serializedTextToScanSpec( context.getConfiguration().get(SCAN_SPEC) );
+
+      java.util.Iterator<RowInterval> iter = m_base_spec.getRow_intervalsIterator();
+      if (iter != null && iter.hasNext()) {
+        ri = iter.next();
+        if (iter.hasNext()) {
+          System.out.println("InputFormat only allows a single ROW interval");
+          System.exit(-1);
+        }
+      }
 
       String namespace = context.getConfiguration().get(NAMESPACE);
       String tablename = context.getConfiguration().get(TABLE);
 
-      ns = m_client.open_namespace(namespace);
+      ns = m_client.namespace_open(namespace);
       List<org.hypertable.thriftgen.TableSplit> tsplits =
-          m_client.get_table_splits(ns, tablename);
+          m_client.table_get_splits(ns, tablename);
       List<InputSplit> splits = new ArrayList<InputSplit>(tsplits.size());
       for (final org.hypertable.thriftgen.TableSplit ts : tsplits) {
-        byte [] start_row = (ts.start_row == null) ? null : ts.start_row.getBytes("UTF-8");
-        byte [] end_row = (ts.end_row == null) ? null : ts.end_row.getBytes("UTF-8");
-        TableSplit split = new TableSplit(tablename.getBytes("UTF-8"), start_row,
-                                          end_row, ts.ip_address);
-        splits.add(split);
+        if (ri == null ||
+            ((!ri.isSetStart_row() || ts.end_row == null || ts.end_row.compareTo(ri.getStart_row()) > 0 ||
+              (ts.end_row.compareTo(ri.getStart_row()) == 0 && ri.isStart_inclusive())) &&
+             (!ri.isSetEnd_row() || ts.start_row == null || ts.start_row.compareTo(ri.getEnd_row()) < 0))) {
+          byte [] start_row = (ts.start_row == null) ? null : ts.start_row.getBytes("UTF-8");
+          byte [] end_row = (ts.end_row == null) ? null : ts.end_row.getBytes("UTF-8");
+          TableSplit split = new TableSplit(tablename.getBytes("UTF-8"), start_row,
+                                            end_row, ts.hostname);
+          splits.add(split);
+        }
       }
       return splits;
     }
@@ -329,7 +348,7 @@ extends org.apache.hadoop.mapreduce.InputFormat<KeyWritable, BytesWritable> {
     finally {
       if (ns != 0) {
         try {
-          m_client.close_namespace(ns);
+          m_client.namespace_close(ns);
         }
         catch (Exception e) {
           e.printStackTrace();

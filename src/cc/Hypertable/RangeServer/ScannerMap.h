@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -82,6 +82,18 @@ namespace Hypertable {
      * @param max_idle_ms maximum idle time
      */
     void purge_expired(uint32_t max_idle_ms);
+
+    /**
+     * This method retrieves outstanding scanner counts.  It returns the
+     * total number of outstanding scanners as well as the number of outstanding
+     * scanners per-table.  Only the tables that exist in the table_scanner_count_map
+     * that is passed into this method will be counted.
+     *
+     * @param totalp address of variable to hold total outstanding counters
+     * @param table_scanner_count_map reference to table count map (NOTE: must be filled
+     * in by caller, no new entries will be added)
+     */
+    void get_counts(int32_t *totalp, CstrToInt32Map &table_scanner_count_map);
 
   private:
 

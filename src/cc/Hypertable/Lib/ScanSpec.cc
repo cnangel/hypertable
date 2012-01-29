@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -83,23 +83,27 @@ void CellInterval::decode(const uint8_t **bufp, size_t *remainp) {
 size_t ScanSpec::encoded_length() const {
   size_t len = encoded_length_vi32(row_limit) +
                encoded_length_vi32(cell_limit) +
+               encoded_length_vi32(cell_limit_per_family) +
                encoded_length_vi32(max_versions) +
                encoded_length_vi32(columns.size()) +
                encoded_length_vi32(row_intervals.size()) +
                encoded_length_vi32(cell_intervals.size()) +
                encoded_length_vstr(row_regexp) +
-               encoded_length_vstr(value_regexp);
+               encoded_length_vstr(value_regexp) +
+               encoded_length_vi32(row_offset) +
+               encoded_length_vi32(cell_offset);
 
   foreach(const char *c, columns) len += encoded_length_vstr(c);
   foreach(const RowInterval &ri, row_intervals) len += ri.encoded_length();
   foreach(const CellInterval &ci, cell_intervals) len += ci.encoded_length();
 
-  return len + 8 + 8 + 2;
+  return len + 8 + 8 + 3;
 }
 
 void ScanSpec::encode(uint8_t **bufp) const {
   encode_vi32(bufp, row_limit);
   encode_vi32(bufp, cell_limit);
+  encode_vi32(bufp, cell_limit_per_family);
   encode_vi32(bufp, max_versions);
   encode_vi32(bufp, columns.size());
   foreach(const char *c, columns) encode_vstr(bufp, c);
@@ -113,6 +117,9 @@ void ScanSpec::encode(uint8_t **bufp) const {
   encode_bool(bufp, keys_only);
   encode_vstr(bufp, row_regexp);
   encode_vstr(bufp, value_regexp);
+  encode_bool(bufp, scan_and_filter_rows);
+  encode_vi32(bufp, row_offset);
+  encode_vi32(bufp, cell_offset);
 }
 
 void ScanSpec::decode(const uint8_t **bufp, size_t *remainp) {
@@ -121,6 +128,7 @@ void ScanSpec::decode(const uint8_t **bufp, size_t *remainp) {
   HT_TRY("decoding scan spec",
     row_limit = decode_vi32(bufp, remainp);
     cell_limit = decode_vi32(bufp, remainp);
+    cell_limit_per_family = decode_vi32(bufp, remainp);
     max_versions = decode_vi32(bufp, remainp);
     for (size_t nc = decode_vi32(bufp, remainp); nc--;)
       columns.push_back(decode_vstr(bufp, remainp));
@@ -134,10 +142,13 @@ void ScanSpec::decode(const uint8_t **bufp, size_t *remainp) {
     }
     time_interval.first = decode_i64(bufp, remainp);
     time_interval.second = decode_i64(bufp, remainp);
-    return_deletes = decode_i8(bufp, remainp);
-    keys_only = decode_i8(bufp, remainp));
+    return_deletes = decode_bool(bufp, remainp);
+    keys_only = decode_bool(bufp, remainp);
     row_regexp = decode_vstr(bufp, remainp);
     value_regexp = decode_vstr(bufp, remainp);
+    scan_and_filter_rows = decode_bool(bufp, remainp);
+    row_offset = decode_vi32(bufp, remainp);
+    cell_offset = decode_vi32(bufp, remainp));
 }
 
 
@@ -189,11 +200,15 @@ ostream &Hypertable::operator<<(ostream &os, const CellInterval &ci) {
 ostream &Hypertable::operator<<(ostream &os, const ScanSpec &scan_spec) {
   os <<"\n{ScanSpec: row_limit="<< scan_spec.row_limit
      <<" cell_limit="<< scan_spec.cell_limit
+     <<" cell_limit_per_family="<< scan_spec.cell_limit_per_family
      <<" max_versions="<< scan_spec.max_versions
      <<" return_deletes="<< scan_spec.return_deletes
      <<" keys_only="<< scan_spec.keys_only;
-  os << " row_regexp=" << scan_spec.row_regexp;
-  os << " value_regexp=" << scan_spec.value_regexp;
+  os <<" row_regexp=" << scan_spec.row_regexp;
+  os <<" value_regexp=" << scan_spec.value_regexp;
+  os <<" scan_and_filter_rows=" << scan_spec.scan_and_filter_rows;
+  os <<" row_offset=" << scan_spec.row_offset;
+  os <<" cell_offset=" << scan_spec.cell_offset;
 
   if (!scan_spec.row_intervals.empty()) {
     os << "\n rows=";
@@ -219,11 +234,16 @@ ostream &Hypertable::operator<<(ostream &os, const ScanSpec &scan_spec) {
 
 
 ScanSpec::ScanSpec(CharArena &arena, const ScanSpec &ss)
-  : row_limit(ss.row_limit), cell_limit(ss.cell_limit), max_versions(ss.max_versions),
-    columns(CstrAlloc(arena)), row_intervals(RowIntervalAlloc(arena)),
+  : row_limit(ss.row_limit), cell_limit(ss.cell_limit), 
+    cell_limit_per_family(ss.cell_limit_per_family),
+    row_offset(ss.row_offset), cell_offset(ss.cell_offset),
+    max_versions(ss.max_versions), columns(CstrAlloc(arena)), 
+    row_intervals(RowIntervalAlloc(arena)),
     cell_intervals(CellIntervalAlloc(arena)),
     time_interval(ss.time_interval.first, ss.time_interval.second),
-    return_deletes(ss.return_deletes), keys_only(ss.keys_only) {
+    return_deletes(ss.return_deletes), keys_only(ss.keys_only),
+    row_regexp(arena.dup(ss.row_regexp)), value_regexp(arena.dup(ss.value_regexp)),
+    scan_and_filter_rows(ss.scan_and_filter_rows) {
   columns.reserve(ss.columns.size());
   row_intervals.reserve(ss.row_intervals.size());
   cell_intervals.reserve(ss.cell_intervals.size());
@@ -241,14 +261,15 @@ ScanSpec::ScanSpec(CharArena &arena, const ScanSpec &ss)
 }
 
 void ScanSpec::parse_column(const char *column_str, String &family, String &qualifier,
-    bool *regexp)
+    bool *has_qualifier, bool *regexp)
 {
   String column = column_str;
   size_t pos = column.find_first_of(':');
   qualifier.clear();
+  *has_qualifier = pos != String::npos;
   *regexp = false;
 
-  if (pos == String::npos) {
+  if (!*has_qualifier) {
     family = column;
   }
   else {

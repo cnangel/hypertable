@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Copyright 2008 Doug Judd (Zvents, Inc.)
+# Copyright (C) 2007-2012 Hypertable, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -41,7 +41,7 @@ usage() {
   echo "  --no-master             do not launch the Hypertable master"
   echo "  --no-thriftbroker       do not launch the ThriftBroker"
   echo ""
-  echo "DFS choices: kfs, hadoop, local"
+  echo "DFS choices: kfs, hadoop, mapr, local"
   echo ""
 }
 

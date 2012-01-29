@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2007 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -32,7 +32,8 @@ namespace Hypertable {
 
   class CommandShutdown : public InteractiveCommand {
   public:
-    CommandShutdown(DfsBroker::Client *client) : m_client(client) { return; }
+  CommandShutdown(DfsBroker::Client *client, bool nowait, bool connected) 
+    : m_client(client), m_nowait(nowait), m_connected(connected) { return; }
     virtual const char *command_text() { return "shutdown"; }
     virtual const char **usage() { return ms_usage; }
     virtual void run();
@@ -41,6 +42,8 @@ namespace Hypertable {
     static const char *ms_usage[];
 
     DfsBroker::Client *m_client;
+    bool m_nowait;
+    bool m_connected;
   };
 }
 

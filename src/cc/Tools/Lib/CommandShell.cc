@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -71,6 +71,28 @@ namespace {
   "source <f> (.)  Execute commands in file <f>.\n" \
   "system     (\\!) Execute a system shell command.\n" \
   "\n";
+
+  char *find_char(const char *s, int c) {
+    bool in_quotes = false;
+    char quote_char = 0;
+
+    for (const char *ptr=s; *ptr; ptr++) {
+      if (in_quotes) {
+        if (*ptr == quote_char && *(ptr-1) != '\\')
+          in_quotes = false;
+      }
+      else {
+        if (*ptr == (char )c)
+          return (char *)ptr;
+        else if (*ptr == '\'' || *ptr == '"') {
+          in_quotes = true;
+          quote_char = *ptr;
+        }
+      }
+    }
+    return 0;
+  }
+
 }
 
 
@@ -104,10 +126,12 @@ CommandShell::CommandShell(const String &program_name,
   if (m_props->has("execute")) {
     m_cmd_str = m_props->get_str("execute");
     m_has_cmd_exec = true;
+    m_batch_mode = true;
   }
   else if (m_props->has("command-file")) {
     m_cmd_file = m_props->get_str("command-file");
     m_has_cmd_file = true;
+    m_batch_mode = true;
   }
 }
 
@@ -192,6 +216,7 @@ int CommandShell::run() {
   String command;
   String timestamp_format;
   String source_commands;
+  String use_ns;
   const char *base, *ptr;
 
   ms_history_file = (String)getenv("HOME") + "/." + m_program_name + "_history";
@@ -227,7 +252,16 @@ int CommandShell::run() {
   m_accum = "";
   if (!m_batch_mode)
     using_history();
+
+  trim_if(m_namespace, boost::is_any_of(" \t\n\r;"));
+  if (m_namespace.size()) {
+    use_ns="USE \""+m_namespace+"\";";
+    line=use_ns.c_str();
+    goto process_line;
+  }
+
   while ((line = rl_gets()) != 0) {
+process_line:
     try {
 
       if (*line == 0)
@@ -308,7 +342,7 @@ int CommandShell::run() {
        * Add commands to queue
        */
       base = line;
-      ptr = strchr(base, ';');
+      ptr = find_char(base, ';');
       while (ptr) {
         m_accum += string(base, ptr-base);
         if (m_accum.size() > 0) {
@@ -319,7 +353,7 @@ int CommandShell::run() {
           m_cont = false;
         }
         base = ptr+1;
-        ptr = strchr(base, ';');
+        ptr = find_char(base, ';');
       }
       command = string(base);
       boost::trim(command);

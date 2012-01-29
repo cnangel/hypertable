@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -43,6 +43,7 @@ extern "C" {
 
 #include "Comm.h"
 #include "CommAddress.h"
+#include "ConnectionInitializer.h"
 #include "DispatchHandler.h"
 
 namespace Hypertable {
@@ -67,6 +68,8 @@ namespace Hypertable {
       InetAddr            inet_addr;
       uint32_t            timeout_ms;
       DispatchHandlerPtr  handler;
+      ConnectionInitializerPtr initializer;
+      bool                initialized;
       Mutex               mutex;
       boost::condition    cond;
       boost::xtime        next_retry;
@@ -175,6 +178,23 @@ namespace Hypertable {
              const char *service_name, DispatchHandlerPtr &handler);
 
     /**
+     * Same as above method except installs a connection initializer
+     *
+     * @param addr The address to maintain a connection to
+     * @param timeout_ms The timeout value (in milliseconds) that gets passed
+     *        into Comm::connect and also used as the waiting period betweeen
+     *        connection attempts
+     * @param service_name The name of the serivce at the other end of the
+     *        connection used for descriptive log messages
+     * @param handler This is the default handler to install on the connection.
+     *        All events get changed through to this handler.
+     */
+    void add_with_initializer(const CommAddress &addr, uint32_t timeout_ms,
+                              const char *service_name,
+                              DispatchHandlerPtr &handler,
+                              ConnectionInitializerPtr &initializer);
+
+    /**
      * Adds a connection to the connection manager with a specific local
      * address.  The address structure addr holds an address that the
      * connection manager should maintain a connection to.  This method first
@@ -274,6 +294,11 @@ namespace Hypertable {
     void operator()();
 
   private:
+
+    void add_internal(const CommAddress &addr, const CommAddress &local_addr,
+                      uint32_t timeout_ms, const char *service_name,
+                      DispatchHandlerPtr &handler,
+                      ConnectionInitializerPtr &initializer);
 
     bool wait_for_connection(ConnectionState *conn_state, Timer &timer);
 

@@ -1,5 +1,5 @@
 /**
- * Copyright 2009 Luke Lu (llu@hypertable.org)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file and its generated files are licensed under the Apache License,
  * Version 2.0 (the "License"); You may not use this file and its generated
@@ -60,6 +60,16 @@ struct HqlResult2 {
 }
 
 /**
+ * Same as HqlResult except with cell as array
+ */
+struct HqlResultAsArrays {
+  1: optional list<string> results,
+  2: optional list<Client.CellAsArray> cells,
+  3: optional i64 scanner,
+  4: optional i64 mutator
+}
+
+/**
  * HQL service is a superset of Client service
  *
  * It adds capability to execute HQL queries to the service
@@ -95,6 +105,10 @@ service HqlService extends Client.ClientService {
   /**
    * @see hql_exec
    */
+  HqlResultAsArrays hql_exec_as_arrays(1:i64 ns, 2:string command, 3:bool noflush = 0,
+                       4:bool unbuffered = 0)
+      throws (1:Client.ClientException e),
+
   HqlResult2 hql_exec2(1:i64 ns, 2:string command, 3:bool noflush = 0,
                        4:bool unbuffered = 0)
       throws (1:Client.ClientException e),
@@ -102,5 +116,7 @@ service HqlService extends Client.ClientService {
   /**
    * @see hql_query
    */
+  HqlResultAsArrays hql_query_as_arrays(1:i64 ns, 2:string command) throws (1:Client.ClientException e)
+
   HqlResult2 hql_query2(1:i64 ns, 2:string command) throws (1:Client.ClientException e)
 }

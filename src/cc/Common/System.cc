@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -25,7 +25,9 @@
 #include <boost/filesystem.hpp>
 
 #include <iostream>
+#include <vector>
 
+#include "Common/FileUtils.h"
 #include "Common/Logger.h"
 #include "Common/Path.h"
 #include "Common/SystemInfo.h"
@@ -50,15 +52,15 @@ String System::_locate_install_dir(const char *argv0) {
   if (!install_dir.empty())
     return install_dir;
 
-  exe_name = Path(argv0).filename();
+  exe_name = Path(argv0).filename().c_str();
 
   Path exepath(proc_info().exe);
 
   // Detect install_dir/bin/exe_name: assumed install layout
   if (exepath.parent_path().filename() == "bin")
-    install_dir = exepath.parent_path().parent_path().directory_string();
+    install_dir = exepath.parent_path().parent_path().string();
   else
-    install_dir = exepath.parent_path().directory_string();
+    install_dir = exepath.parent_path().string();
 
   return install_dir;
 }
@@ -79,7 +81,7 @@ void System::_init(const String &install_directory) {
   }
 
   if (exe_name.empty())
-    exe_name = Path(proc_info().args[0]).filename();
+    exe_name = Path(proc_info().args[0]).filename().c_str();
 
   // initialize logging system
   Logger::initialize(exe_name);
@@ -88,6 +90,32 @@ void System::_init(const String &install_directory) {
 
 int32_t System::get_processor_count() {
   return cpu_info().total_cores;
+}
+
+namespace {
+  int32_t drive_count = 0;
+}
+
+int32_t System::get_drive_count() {
+
+  if (drive_count > 0)
+    return drive_count;
+
+#if defined(__linux__)
+  String device_regex = "sd[a-z][a-z]?|hd[a-z][a-z]?";
+#elif defined(__APPLE__)
+  String device_regex = "disk[0-9][0-9]?";
+#else
+  ImplementMe;
+#endif
+
+  vector<struct dirent> listing;
+
+  FileUtils::readdir("/dev", device_regex, listing);
+
+  drive_count = listing.size();
+
+  return drive_count;
 }
 
 int32_t System::get_pid() {

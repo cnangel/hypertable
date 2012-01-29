@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -35,20 +35,34 @@ namespace Hypertable {
     /**
      * Removes the range associated with the given end_row
      *
+     * @param start_row end row of range to remove
      * @param end_row end row of range to remove
      * @return true if removed, false if not found
      */
-    virtual bool remove(const String &end_row) = 0;
+    virtual bool remove(const String &start_row, const String &end_row) = 0;
 
     /**
      * Changes the end row key associated with a range
      *
+     * @param start_row start row of range to remove
      * @param old_end_row old end row key of range
      * @param new_end_row new end row key for range
      * @return true if range found and end row changed, false otherwise
      */
-    virtual bool change_end_row(const String &old_end_row,
-                                const String &new_end_row) = 0;
+    virtual bool change_end_row(const String &start_row,
+                                const String &old_end_row, const String &new_end_row) = 0;
+
+    /**
+     * Changes the start row key associated with a range
+     *
+     * @param old_start_row old start row of range to remove
+     * @param new_start_row new start row key of range
+     * @param end_row end row key for range
+     * @return true if range found and end row changed, false otherwise
+     */
+    virtual bool change_start_row(const String &old_start_row, const String &new_start_row,
+                                  const String &new_end_row) = 0;
+
   };
 
   typedef intrusive_ptr<RangeSet> RangeSetPtr;

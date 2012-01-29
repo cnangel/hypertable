@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -27,7 +27,7 @@
 
 #include "Hypertable/Lib/BlockCompressionHeader.h"
 #include "Global.h"
-#include "CellStoreBlockIndexMap.h"
+#include "CellStoreBlockIndexArray.h"
 #include "CellStoreScanner.h"
 
 #include "CellStoreScannerInterval.h"
@@ -43,7 +43,7 @@ CellStoreScanner<IndexT>::CellStoreScanner(CellStore *cellstore, ScanContextPtr 
   m_interval_max(0), m_keys_only(false), m_eos(false) {
   SerializedKey start_key, end_key;
 
-  m_keys_only = (scan_ctx->spec) ? scan_ctx->spec->keys_only : false;
+  m_keys_only = (scan_ctx->spec) ? (scan_ctx->spec->keys_only && !scan_ctx->spec->value_regexp) : false;
 
   memset(m_interval_scanners, 0, 3*sizeof(CellStoreScannerInterval *));
 
@@ -184,6 +184,14 @@ bool CellStoreScanner<IndexT>::get(Key &key, ByteString &value) {
   return false;
 }
 
+template <typename IndexT>
+uint64_t CellStoreScanner<IndexT>::get_disk_read() {
+  uint64_t amount = 0;
+  for (size_t i=0; i<m_interval_max; i++)
+    amount += m_interval_scanners[i]->get_disk_read();
+  return amount;
+}
+
 
 
 template <typename IndexT>
@@ -193,5 +201,5 @@ void CellStoreScanner<IndexT>::forward() {
   m_interval_scanners[m_interval_index]->forward();
 }
 
-template class CellStoreScanner<CellStoreBlockIndexMap<uint32_t> >;
-template class CellStoreScanner<CellStoreBlockIndexMap<int64_t> >;
+template class CellStoreScanner<CellStoreBlockIndexArray<uint32_t> >;
+template class CellStoreScanner<CellStoreBlockIndexArray<int64_t> >;

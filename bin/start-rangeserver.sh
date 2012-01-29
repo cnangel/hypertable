@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Copyright 2008 Doug Judd (Zvents, Inc.)
+# Copyright (C) 2007-2012 Hypertable, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -37,6 +37,10 @@ while [ "$1" != "${1##[-+]}" ]; do
       ;;
     --heapcheck)
       HEAPCHECK="env HEAPCHECK=normal"
+      shift
+      ;;
+    --heapprofile)
+      HEAPCHECK="env HEAPPROFILE=/tmp/rs-$$.hprof"
       shift
       ;;
     *)

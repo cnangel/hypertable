@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -52,33 +52,25 @@ namespace Hypertable {
     }
 
     /**
-     * Clears the live file set.  Sets the m_need_update flag to true.
-     */
-    void clear_live() {
-      ScopedLock lock(m_mutex);
-      m_live.clear();
-      m_need_update = true;
-    }
-
-    /**
-     * Adds a file to the live file set.
+     * Updates the live file set
      *
-     * @param fname file to add
+     * @param add filename to add
+     * @param deletes vector of filenames to delete
+     * @param nextcsid Next available CellStore ID
+     * @param total_blocks Total number of cell store blocks in access group
      */
-    void add_live(const String &fname) {
-      ScopedLock lock(m_mutex);
-      m_live.insert(fname);
-      m_need_update = true;
-    }
+    void update_live(const String &add, std::vector<String> &deletes, uint32_t nextcsid, int64_t total_blocks);
 
     /**
      * Adds a file to the live file set without seting the 'need_update' bit
      *
      * @param fname file to add
+     * @param total_blocks Total number of cell store blocks in access group
      */
-    void add_live_noupdate(const String &fname) {
+    void add_live_noupdate(const String &fname, int64_t total_blocks) {
       ScopedLock lock(m_mutex);
-      m_live.insert(fname);
+      m_live.insert(strip_basename(fname));
+      m_total_blocks = total_blocks;
     }
 
     /**
@@ -112,14 +104,23 @@ namespace Hypertable {
      * the list, prefixed by the '#' character
      *
      * @param file_list reference to output string to hold file list
+     * @param block_countp address of integer to hold the block count for this AG
      * @param include_blocked include commented out files blocked from GC
      */
-    void get_file_list(String &file_list, bool include_blocked);
+    void get_file_data(String &file_list, int64_t *block_countp, bool include_blocked);
+
+    void set_next_csid(uint32_t nid) { 
+      m_last_nextcsid = m_cur_nextcsid = nid;
+    }
 
   private:
+
+    String strip_basename(const String &fname);
+
     Mutex            m_mutex;
     Mutex            m_update_mutex;
     TableIdentifierManaged m_identifier;
+    String           m_file_basename;
     SchemaPtr        m_schema_ptr;
     String           m_start_row;
     String           m_end_row;
@@ -129,6 +130,9 @@ namespace Hypertable {
     std::set<String> m_blocked;
     bool             m_need_update;
     bool             m_is_root;
+    uint32_t         m_last_nextcsid;
+    uint32_t         m_cur_nextcsid;
+    int64_t          m_total_blocks;
   };
 
 }

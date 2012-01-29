@@ -1,9 +1,9 @@
 #
-# Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+# Copyright (C) 2007-2012 Hypertable, Inc.
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
-# as published by the Free Software Foundation; either version 2
+# as published by the Free Software Foundation; either version 3
 # of the License, or any later version.
 #
 # This program is distributed in the hope that it will be useful,
@@ -19,9 +19,13 @@
 
 add_subdirectory(dfsclient)
 add_subdirectory(dumplog)
+add_subdirectory(generate_error_code_doc)
 add_subdirectory(hyperspace)
 add_subdirectory(hypertable)
+add_subdirectory(master_client)
 add_subdirectory(merge_diff)
+add_subdirectory(metalog_dump)
+add_subdirectory(prepend_md5)
 add_subdirectory(prune_tsv)
 add_subdirectory(rsclient)
 add_subdirectory(rsstat)
@@ -29,3 +33,4 @@ add_subdirectory(serverup)
 add_subdirectory(Lib)
 add_subdirectory(load_generator)
 add_subdirectory(get_property)
+add_subdirectory(balance_plan_generator)

@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -106,6 +106,13 @@ namespace Hypertable {
       return m_arena.total();
     }
 
+    void get_counts(size_t *cellsp, int64_t *key_bytesp, int64_t *value_bytesp) {
+      ScopedLock lock(m_mutex);
+      *cellsp = m_cell_map.size();
+      *key_bytesp = m_key_bytes;
+      *value_bytesp = m_value_bytes;
+    }
+
     int32_t get_collision_count() { return m_collisions; }
 
     int32_t get_delete_count() { return m_deletes; }
@@ -136,6 +143,8 @@ namespace Hypertable {
     CellMap            m_cell_map;
     int32_t            m_deletes;
     int32_t            m_collisions;
+    int64_t            m_key_bytes;
+    int64_t            m_value_bytes;
     bool               m_frozen;
     bool               m_have_counter_deletes;
 

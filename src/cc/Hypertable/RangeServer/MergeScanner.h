@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -25,6 +25,7 @@
 #include <queue>
 #include <string>
 #include <vector>
+#include <set>
 
 #include "Common/ByteString.h"
 #include "Common/DynamicBuffer.h"
@@ -49,128 +50,61 @@ namespace Hypertable {
       }
     };
 
-    MergeScanner(ScanContextPtr &scan_ctx, bool return_everything=true, bool ag_scanner=false);
+    MergeScanner(ScanContextPtr &scan_ctx);
+
     virtual ~MergeScanner();
+
     virtual void forward();
+
     virtual bool get(Key &key, ByteString &value);
+
     void add_scanner(CellListScanner *scanner);
 
     void install_release_callback(CellStoreReleaseCallback &cb) {
       m_release_callback = cb;
     }
 
-    void enable_io_accounting() { m_track_io = true; }
-
-    void get_io_accounting_data(int64_t *inp, int64_t *outp) {
-      *inp = m_bytes_input;
-      *outp = m_bytes_output;
+    void io_add_input_cell(uint64_t cur_bytes) {
+      m_bytes_input += cur_bytes;
+      m_cells_input++;
     }
 
-  private:
+    void io_add_output_cell(uint64_t cur_bytes) {
+      m_bytes_output += cur_bytes;
+      m_cells_output++;
+    }
+
+    void get_io_accounting_data(uint64_t *inbytesp, uint64_t *outbytesp,
+                                uint64_t *incellsp=0, uint64_t *outcellsp=0) {
+      *inbytesp = m_bytes_input;
+      *outbytesp = m_bytes_output;
+      if (incellsp)
+        *incellsp = m_cells_input;
+      if (outcellsp)
+        *outcellsp = m_cells_output;
+    }
+
+    virtual uint64_t get_disk_read();
+
+  protected:
     void initialize();
-    inline bool matches_deleted_row(const Key& key) const {
-      size_t len = key.len_row();
-
-      HT_DEBUG_OUT <<"filtering deleted row '"
-          << String((char*)m_deleted_row.base, m_deleted_row.fill()) <<"' vs '"
-          << String(key.row, len) <<"'" << HT_END;
-
-      return (m_delete_present && m_deleted_row.fill() > 0
-              && m_deleted_row.fill() == len
-              && !memcmp(m_deleted_row.base, key.row, len));
-    }
-    inline bool matches_deleted_column_family(const Key& key) const {
-      size_t len = key.len_column_family();
-
-      HT_DEBUG_OUT <<"filtering deleted row-column-family '"
-          << String((char*)m_deleted_column_family.base,
-                    m_deleted_column_family.fill())
-          <<"' vs '"<< String(key.row, len) <<"'" << HT_END;
-
-      return (m_delete_present && m_deleted_column_family.fill() > 0
-              && m_deleted_column_family.fill() == len
-              && !memcmp(m_deleted_column_family.base, key.row, len));
-    }
-    inline bool matches_deleted_cell(const Key& key) const {
-      size_t len = key.len_cell();
-
-      HT_DEBUG_OUT <<"filtering deleted cell '"
-          << String((char*)m_deleted_cell.base, m_deleted_cell.fill())
-          <<"' vs '"<< String(key.row, len) <<"'" << HT_END;
-
-      return (m_delete_present && m_deleted_cell.fill() > 0
-              &&  m_deleted_cell.fill() == len
-              && !memcmp(m_deleted_cell.base, key.row, len));
-    }
-    inline bool matches_counted_key(const Key& key) const {
-      size_t len = key.len_cell();
-      size_t len_counted_key = m_counted_key.len_cell();
-
-      return (m_count_present && len == len_counted_key &&
-              !memcmp(m_counted_key.row, key.row, len));
-    }
-
-    inline void increment_count(const Key &key, const ByteString &value) {
-      if (m_skip_remaining_counter)
-        return;
-      const uint8_t *decode;
-      size_t remain = value.decode_length(&decode);
-      // value must be encoded 64 bit int
-      if (remain != 8 && remain != 9) {
-        HT_FATAL_OUT << "Expected counter to be encoded 64 bit int but remain=" << remain
-            << " ,key=" << key << HT_END;
-      }
-      m_count += Serialization::decode_i64(&decode, &remain);
-      if (remain == 1) {
-        if ((char)*decode != '=')
-          HT_FATAL_OUT << "Bad counter reset flag, expected '=' but got " << (int)*decode << HT_END;
-        m_skip_remaining_counter = true;        
-      }
-    }
-    void finish_count();
+    virtual bool do_get(Key &key, ByteString &value) = 0;
+    virtual void do_initialize() = 0;
+    virtual void do_forward() = 0;
 
     bool          m_done;
     bool          m_initialized;
     std::vector<CellListScanner *>  m_scanners;
     std::priority_queue<ScannerState, std::vector<ScannerState>,
         LtScannerState> m_queue;
-    bool          m_delete_present;
-    DynamicBuffer m_deleted_row;
-    int64_t       m_deleted_row_timestamp;
-    DynamicBuffer m_deleted_column_family;
-    int64_t       m_deleted_column_family_timestamp;
-    DynamicBuffer m_deleted_cell;
-    int64_t       m_deleted_cell_timestamp;
-    bool          m_return_deletes; // if this is true, return a delete even if
-                                    // it doesn't satisfy ScanSpec
-                                    // timestamp/version requirement
 
-    bool          m_no_forward;
-    bool          m_count_present;
-    bool          m_skip_remaining_counter;
-    uint64_t      m_count;
-    Key           m_counted_key;
-    DynamicBuffer m_counted_value;
-    DynamicBuffer m_tmp_count;
-
-    bool          m_ag_scanner;
-    bool          m_track_io;
-    int32_t       m_row_count;
-    int32_t       m_row_limit;
-    int32_t       m_cell_count;
-    int32_t       m_cell_limit;
-    uint32_t      m_revs_count;
-    uint32_t      m_revs_limit;
-    int64_t       m_cell_cutoff;
-    int64_t       m_start_timestamp;
-    int64_t       m_end_timestamp;
-    int64_t       m_bytes_input;
-    int64_t       m_bytes_output;
-    int64_t       m_cur_bytes;
-    int64_t       m_revision;
-    DynamicBuffer m_prev_key;
-    int32_t       m_prev_cf;
     CellStoreReleaseCallback m_release_callback;
+
+  private:
+    uint64_t      m_bytes_input;
+    uint64_t      m_bytes_output;
+    uint64_t      m_cells_input;
+    uint64_t      m_cells_output;
   };
 
   typedef boost::intrusive_ptr<MergeScanner> MergeScannerPtr;

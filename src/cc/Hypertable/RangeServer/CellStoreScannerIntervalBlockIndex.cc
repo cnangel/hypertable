@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -27,7 +27,7 @@
 
 #include "Hypertable/Lib/BlockCompressionHeader.h"
 #include "Global.h"
-#include "CellStoreBlockIndexMap.h"
+#include "CellStoreBlockIndexArray.h"
 
 #include "CellStoreScannerIntervalBlockIndex.h"
 
@@ -38,7 +38,8 @@ template <typename IndexT>
 CellStoreScannerIntervalBlockIndex<IndexT>::CellStoreScannerIntervalBlockIndex(CellStore *cellstore,
   IndexT *index, SerializedKey start_key, SerializedKey end_key, ScanContextPtr &scan_ctx) :
   m_cellstore(cellstore), m_index(index), m_start_key(start_key),
-  m_end_key(end_key), m_fd(-1), m_check_for_range_end(false), m_scan_ctx(scan_ctx) {
+  m_end_key(end_key), m_fd(-1), m_cached(false), m_check_for_range_end(false),
+  m_scan_ctx(scan_ctx), m_rowset(scan_ctx->rowset) {
 
   memset(&m_block, 0, sizeof(m_block));
   m_file_id = m_cellstore->get_file_id();
@@ -92,8 +93,12 @@ CellStoreScannerIntervalBlockIndex<IndexT>::CellStoreScannerIntervalBlockIndex(C
 
 template <typename IndexT>
 CellStoreScannerIntervalBlockIndex<IndexT>::~CellStoreScannerIntervalBlockIndex() {
-  if (m_block.base != 0)
-    Global::block_cache->checkin(m_file_id, m_block.offset);
+  if (m_block.base != 0) {
+    if (m_cached)
+      Global::block_cache->checkin(m_file_id, m_block.offset);
+    else
+      delete [] m_block.base;
+  }
   delete m_zcodec;
   delete m_key_decompressor;
 }
@@ -147,7 +152,9 @@ void CellStoreScannerIntervalBlockIndex<IndexT>::forward() {
     m_key_decompressor->load(m_key);
     if (m_key.flag == FLAG_DELETE_ROW
         || m_scan_ctx->family_mask[m_key.column_family_code])
-      break;
+      // forward to next row requested by scan and filter rows
+      if (m_rowset.empty() || strcmp(m_key.row, *m_rowset.begin()) >= 0)
+        break;
   }
 }
 
@@ -170,9 +177,18 @@ bool CellStoreScannerIntervalBlockIndex<IndexT>::fetch_next_block(bool eob) {
 
   // If we're at the end of the current block, deallocate and move to next
   if (m_block.base != 0 && eob) {
-    Global::block_cache->checkin(m_file_id, m_block.offset);
+    if (m_cached)
+      Global::block_cache->checkin(m_file_id, m_block.offset);
+    else
+      delete [] m_block.base;
     memset(&m_block, 0, sizeof(m_block));
     ++m_iter;
+
+    // find next block requested by scan and filter rows
+    if (m_rowset.size()) {
+      while (m_iter != m_index->end() && strcmp(*m_rowset.begin(), m_iter.key().row()) > 0)
+        ++m_iter;
+    }
   }
 
   if (m_block.base == 0 && m_iter != m_index->end()) {
@@ -197,8 +213,9 @@ bool CellStoreScannerIntervalBlockIndex<IndexT>::fetch_next_block(bool eob) {
     /**
      * Cache lookup / block read
      */
-    if (!Global::block_cache->checkout(m_file_id, (uint32_t)m_block.offset,
-                                      (uint8_t **)&m_block.base, &len)) {
+    if (Global::block_cache == 0 ||
+        !Global::block_cache->checkout(m_file_id, (uint32_t)m_block.offset,
+                                       (uint8_t **)&m_block.base, &len)) {
       bool second_try = false;
     try_again:
       try {
@@ -216,12 +233,14 @@ bool CellStoreScannerIntervalBlockIndex<IndexT>::fetch_next_block(bool eob) {
 
         m_zcodec->inflate(buf, expand_buf, header);
 
+        m_disk_read += expand_buf.fill();
+
         if (!header.check_magic(CellStore::DATA_BLOCK_MAGIC))
           HT_THROW(Error::BLOCK_COMPRESSOR_BAD_MAGIC,
                    "Error inflating cell store block - magic string mismatch");
       }
       catch (Exception &e) {
-        HT_ERROR_OUT <<"Error reading cell store ("
+        HT_ERROR_OUT <<"Error reading cell store (fd=" << m_fd << " file="
                      << m_cellstore->get_filename() <<") : "
                      << e << HT_END;
         HT_ERROR_OUT << "pread(fd=" << m_fd << ", zlen="
@@ -238,18 +257,17 @@ bool CellStoreScannerIntervalBlockIndex<IndexT>::fetch_next_block(bool eob) {
       m_block.base = expand_buf.release(&fill);
       len = fill;
 
-      /** Insert block into cache  **/
-      if (!Global::block_cache->insert_and_checkout(m_file_id, m_block.offset,
-                                         (uint8_t *)m_block.base, len)) {
-        delete [] m_block.base;
+      m_cached = false;
 
-        if (!Global::block_cache->checkout(m_file_id, m_block.offset,
-                                          (uint8_t **)&m_block.base, &len)) {
-          HT_FATALF("Problem checking out block from cache file_id=%d, "
-                    "offset=%lld", m_file_id, (Lld)m_block.offset);
-        }
-      }
+      /** Insert block into cache  **/
+      if (Global::block_cache &&
+          Global::block_cache->insert_and_checkout(m_file_id, m_block.offset,
+                                                   (uint8_t *)m_block.base, len))
+        m_cached = true;
     }
+    else
+      m_cached = true;
+
     m_key_decompressor->reset();
     m_block.end = m_block.base + len;
     m_cur_value.ptr = m_key_decompressor->add(m_block.base);
@@ -260,5 +278,5 @@ bool CellStoreScannerIntervalBlockIndex<IndexT>::fetch_next_block(bool eob) {
 }
 
 
-template class CellStoreScannerIntervalBlockIndex<CellStoreBlockIndexMap<uint32_t> >;
-template class CellStoreScannerIntervalBlockIndex<CellStoreBlockIndexMap<int64_t> >;
+template class CellStoreScannerIntervalBlockIndex<CellStoreBlockIndexArray<uint32_t> >;
+template class CellStoreScannerIntervalBlockIndex<CellStoreBlockIndexArray<int64_t> >;

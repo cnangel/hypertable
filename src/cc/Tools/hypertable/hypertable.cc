@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -37,6 +37,8 @@ namespace {
       cmdline_desc().add_options()
         ("no-log-sync", boo()->default_value(false),
          "Don't sync rangeserver commit logs on autoflush")
+        ("namespace", str()->default_value(""),
+         "Automatically use specified namespace when starting")
         ;
       alias("no-log-sync", "Hypertable.HqlInterpreter.Mutator.NoLogSync");
     }
@@ -60,6 +62,7 @@ int main(int argc, char **argv) {
     hypertable = new Hypertable::Client();
     interp = new HqlCommandInterpreter(hypertable);
     shell = new CommandShell("hypertable", interp, properties);
+    shell->set_namespace(get_str("namespace"));
     interp->set_silent(shell->silent());
     interp->set_test_mode(shell->test_mode());
 

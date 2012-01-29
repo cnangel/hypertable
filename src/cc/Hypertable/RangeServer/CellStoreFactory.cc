@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -31,11 +31,13 @@
 #include "CellStoreV2.h"
 #include "CellStoreV3.h"
 #include "CellStoreV4.h"
+#include "CellStoreV5.h"
 #include "CellStoreTrailerV0.h"
 #include "CellStoreTrailerV1.h"
 #include "CellStoreTrailerV2.h"
 #include "CellStoreTrailerV3.h"
 #include "CellStoreTrailerV4.h"
+#include "CellStoreTrailerV5.h"
 #include "Global.h"
 
 using namespace Hypertable;
@@ -84,7 +86,22 @@ CellStore *CellStoreFactory::open(const String &name,
     fd = Global::dfs->open(name);
   }
 
-  if (version == 4) {
+  if (version == 5) {
+    CellStoreTrailerV5 trailer_v5;
+    CellStoreV5 *cellstore_v5;
+
+    if (amount < trailer_v5.size())
+      HT_THROWF(Error::RANGESERVER_CORRUPT_CELLSTORE,
+                "Bad length of CellStoreV5 file '%s' - %llu",
+                name.c_str(), (Llu)file_length);
+
+    trailer_v5.deserialize(trailer_buf.get() + (amount - trailer_v5.size()));
+
+    cellstore_v5 = new CellStoreV5(Global::dfs.get());
+    cellstore_v5->open(name, start, end, fd, file_length, &trailer_v5);
+    return cellstore_v5;
+  }
+  else if (version == 4) {
     CellStoreTrailerV4 trailer_v4;
     CellStoreV4 *cellstore_v4;
 
@@ -95,7 +112,7 @@ CellStore *CellStoreFactory::open(const String &name,
 
     trailer_v4.deserialize(trailer_buf.get() + (amount - trailer_v4.size()));
 
-    cellstore_v4 = new CellStoreV4(Global::dfs);
+    cellstore_v4 = new CellStoreV4(Global::dfs.get());
     cellstore_v4->open(name, start, end, fd, file_length, &trailer_v4);
     return cellstore_v4;
   }
@@ -110,7 +127,7 @@ CellStore *CellStoreFactory::open(const String &name,
 
     trailer_v3.deserialize(trailer_buf.get() + (amount - trailer_v3.size()));
 
-    cellstore_v3 = new CellStoreV3(Global::dfs);
+    cellstore_v3 = new CellStoreV3(Global::dfs.get());
     cellstore_v3->open(name, start, end, fd, file_length, &trailer_v3);
     return cellstore_v3;
   }
@@ -125,7 +142,7 @@ CellStore *CellStoreFactory::open(const String &name,
 
     trailer_v2.deserialize(trailer_buf.get() + (amount - trailer_v2.size()));
 
-    cellstore_v2 = new CellStoreV2(Global::dfs);
+    cellstore_v2 = new CellStoreV2(Global::dfs.get());
     cellstore_v2->open(name, start, end, fd, file_length, &trailer_v2);
     return cellstore_v2;
   }
@@ -140,7 +157,7 @@ CellStore *CellStoreFactory::open(const String &name,
 
     trailer_v1.deserialize(trailer_buf.get() + (amount - trailer_v1.size()));
 
-    cellstore_v1 = new CellStoreV1(Global::dfs);
+    cellstore_v1 = new CellStoreV1(Global::dfs.get());
     cellstore_v1->open(name, start, end, fd, file_length, &trailer_v1);
     return cellstore_v1;
   }
@@ -155,7 +172,7 @@ CellStore *CellStoreFactory::open(const String &name,
 
     trailer_v0.deserialize(trailer_buf.get() + (amount - trailer_v0.size()));
 
-    cellstore_v0 = new CellStoreV0(Global::dfs);
+    cellstore_v0 = new CellStoreV0(Global::dfs.get());
     cellstore_v0->open(name, start, end, fd, file_length, &trailer_v0);
     return cellstore_v0;
   }

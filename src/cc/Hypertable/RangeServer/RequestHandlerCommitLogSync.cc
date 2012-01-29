@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2009 Sanjit Jhala (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -38,12 +38,16 @@ using namespace Hypertable;
  */
 void RequestHandlerCommitLogSync::run() {
   ResponseCallback cb(m_comm, m_event_ptr);
+  TableIdentifier table;
+  const uint8_t *decode_ptr = m_event_ptr->payload;
+  size_t decode_remain = m_event_ptr->payload_len;
 
   try {
-    m_range_server->commit_log_sync(&cb);
+    table.decode(&decode_ptr, &decode_remain);
+    m_range_server->commit_log_sync(&cb, &table);
   }
   catch (Exception &e) {
     HT_ERROR_OUT << e << HT_END;
-    cb.error(Error::PROTOCOL_ERROR, "Error handling commit log sync request");
+    cb.error(e.code(), e.what());
   }
 }

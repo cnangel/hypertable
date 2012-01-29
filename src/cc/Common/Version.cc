@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2007 Luke Lu (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -28,9 +28,9 @@ const int version_major = HT_VERSION_MAJOR;
 const int version_minor = HT_VERSION_MINOR;
 const int version_micro = HT_VERSION_MICRO;
 const int version_patch = HT_VERSION_PATCH;
-
-const char *version() {
-  return HT_VERSION;
+const std::string version_misc_suffix = HT_VERSION_MISC_SUFFIX;
+const char *version_string() {
+  return HT_VERSION_STRING;
 }
 
 } // namespace Hypertable

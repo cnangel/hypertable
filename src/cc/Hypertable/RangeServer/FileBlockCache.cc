@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -86,14 +86,20 @@ FileBlockCache::insert_and_checkout(int file_id, uint32_t file_offset,
   HashIndex &hash_index = m_cache.get<1>();
   int64_t key = ((int64_t)file_id << 32) | file_offset;
 
-  if (length > m_limit || hash_index.find(key) != hash_index.end())
+  if (hash_index.find(key) != hash_index.end())
     return false;
 
   if (m_available < length)
     make_room(length);
 
-  if (m_available < length)
-    return false;
+  if (m_available < length) {
+    if ((length-m_available) <= (m_max_memory-m_limit)) {
+      m_limit += (length-m_available);
+      m_available += (length-m_available);
+    }
+    else
+      return false;
+  }
 
   BlockCacheEntry entry(file_id, file_offset);
   entry.block = block;
@@ -168,11 +174,11 @@ int64_t FileBlockCache::make_room(int64_t amount) {
   return amount_freed;
 }
 
-void FileBlockCache::get_stats(uint64_t &max_memory, uint64_t &available_memory,
-                               uint64_t &accesses, uint64_t &hits) {
+void FileBlockCache::get_stats(uint64_t *max_memoryp, uint64_t *available_memoryp,
+                               uint64_t *accessesp, uint64_t *hitsp) {
   ScopedLock lock(m_mutex);
-  max_memory = m_limit;
-  available_memory = m_available;
-  accesses = m_accesses;
-  hits = m_hits;
+  *max_memoryp = m_limit;
+  *available_memoryp = m_available;
+  *accessesp = m_accesses;
+  *hitsp = m_hits;
 }

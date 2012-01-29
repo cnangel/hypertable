@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -97,8 +97,8 @@ void DataGeneratorIterator::next() {
     m_cell.column_family = m_columns[m_next_column]->column_family.c_str();
     m_cell.column_qualifier = m_columns[m_next_column]->qualifier().c_str();
     if (!m_keys_only) {
-      m_cell.value = (const ::uint8_t *)m_columns[m_next_column]->value().c_str();
-      m_cell.value_len = m_columns[m_next_column]->value().length();
+      m_cell.value = (const ::uint8_t *)m_columns[m_next_column]->value();
+      m_cell.value_len = m_columns[m_next_column]->value_len();
     }
     m_last_data_size = m_row.length() + strlen(m_cell.column_qualifier) + m_cell.value_len;
     m_amount += m_last_data_size;

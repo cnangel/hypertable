@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -28,7 +28,7 @@
 
 #include "Hypertable/Lib/BlockCompressionHeader.h"
 #include "Global.h"
-#include "CellStoreBlockIndexMap.h"
+#include "CellStoreBlockIndexArray.h"
 
 #include "CellStoreScannerIntervalReadahead.h"
 
@@ -51,7 +51,6 @@ CellStoreScannerIntervalReadahead<IndexT>::CellStoreScannerIntervalReadahead(Cel
   memset(&m_block, 0, sizeof(m_block));
   m_zcodec = m_cellstore->create_block_compression_codec();
   m_key_decompressor = m_cellstore->create_key_decompressor();
-
 
   uint16_t csversion = boost::any_cast<uint16_t>(cellstore->get_trailer()->get("version"));
   if (csversion >= 4)
@@ -278,12 +277,14 @@ bool CellStoreScannerIntervalReadahead<IndexT>::fetch_next_block_readahead(bool 
 
       m_zcodec->inflate(input_buf, expand_buf, header);
 
+      m_disk_read += expand_buf.fill();
+
       if (!header.check_magic(CellStore::DATA_BLOCK_MAGIC))
         HT_THROW(Error::BLOCK_COMPRESSOR_BAD_MAGIC,
                  "Error inflating cell store block - magic string mismatch");
     }
     catch (Exception &e) {
-      HT_ERROR_OUT <<"Error reading cell store ("
+      HT_ERROR_OUT <<"Error reading cell store ( fd=" << m_fd << " file="
                    << m_cellstore->get_filename() <<") block: "
                    << e << HT_END;
       HT_THROW2(e.code(), e, e.what());
@@ -303,5 +304,5 @@ bool CellStoreScannerIntervalReadahead<IndexT>::fetch_next_block_readahead(bool 
   return false;
 }
 
-template class CellStoreScannerIntervalReadahead<CellStoreBlockIndexMap<uint32_t> >;
-template class CellStoreScannerIntervalReadahead<CellStoreBlockIndexMap<int64_t> >;
+template class CellStoreScannerIntervalReadahead<CellStoreBlockIndexArray<uint32_t> >;
+template class CellStoreScannerIntervalReadahead<CellStoreBlockIndexArray<int64_t> >;

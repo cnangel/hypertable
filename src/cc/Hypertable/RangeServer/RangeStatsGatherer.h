@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -25,6 +25,8 @@
 #include "Common/PageArena.h"
 #include "Common/ReferenceCount.h"
 
+#include "Hypertable/Lib/TableMutator.h"
+
 #include "MaintenanceQueue.h"
 #include "Range.h"
 #include "TableInfoMap.h"
@@ -39,7 +41,7 @@ namespace Hypertable {
 
     virtual ~RangeStatsGatherer() { }
 
-    void fetch(RangeStatsVector &range_stats);
+    void fetch(RangeStatsVector &range_stats, size_t *lenp=0, TableMutator *mutator=0);
 
     void clear();
 

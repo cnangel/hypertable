@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -32,12 +32,12 @@ namespace Hypertable {
   class MaintenanceTask {
   public:
 
-    MaintenanceTask(boost::xtime &stime, RangePtr &range, const String &desc)
-      : start_time(stime), priority(0), m_range(range), m_retry(false),
+    MaintenanceTask(int _level, int _priority, boost::xtime &stime, RangePtr &range, const String &desc)
+      : start_time(stime), level(_level), priority(_priority), m_range(range), m_retry(false),
         m_description(desc) { }
 
-    MaintenanceTask(const String &desc) : priority(0), m_retry(false),
-                                          m_description(desc) {
+    MaintenanceTask(int _level, int _priority, const String &desc) :
+      level(_level), priority(_priority), m_retry(false), m_description(desc) {
       boost::xtime_get(&start_time, boost::TIME_UTC);
     }
 
@@ -63,6 +63,7 @@ namespace Hypertable {
     }
 
     boost::xtime start_time;
+    int level;
     int priority;
 
   protected:

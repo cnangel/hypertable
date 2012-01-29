@@ -1,11 +1,11 @@
 /** -*- C++ -*-
- * Copyright (C) 2008  Luke Lu (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -157,8 +157,14 @@ std::ostream &operator<<(std::ostream &out, const ScanSpec &ss) {
   if (ss.__isset.row_limit)
     out <<" row_limit="<< ss.row_limit;
 
-  if (ss.__isset.revs)
-    out <<" revs="<< ss.revs;
+  if (ss.__isset.cell_limit)
+    out <<" cell_limit="<< ss.row_limit;
+
+  if (ss.__isset.cell_limit_per_family)
+    out <<" cell_limit_per_family="<< ss.cell_limit_per_family;
+
+  if (ss.__isset.versions)
+    out <<" versions="<< ss.versions;
 
   if (ss.__isset.return_deletes)
     out <<" return_deletes="<< ss.return_deletes;
@@ -177,6 +183,15 @@ std::ostream &operator<<(std::ostream &out, const ScanSpec &ss) {
 
   if (ss.__isset.end_time)
     out <<" end_time="<< ss.end_time;
+
+  if (ss.__isset.scan_and_filter_rows)
+    out <<" scan_and_filter_rows="<< ss.scan_and_filter_rows;
+
+  if (ss.__isset.row_offset)
+    out <<" row_offset="<< ss.row_offset;
+
+  if (ss.__isset.cell_offset)
+    out <<" cell_offset="<< ss.cell_offset;
 
   return out <<'}';
 }
@@ -207,6 +222,30 @@ std::ostream &operator<<(std::ostream &out, const HqlResult &hr) {
 
 std::ostream &operator<<(std::ostream &out, const HqlResult2 &hr) {
   out <<"{HqlResult2:";
+
+  if (hr.__isset.results) {
+    out <<" results=[";
+    foreach(const std::string &s, hr.results)
+      out <<"  '"<< s <<"'\n";
+    out <<"  ]\n";
+  }
+  if (hr.__isset.cells) {
+    out <<" cells=[\n";
+    foreach(const CellAsArray &cell, hr.cells)
+      out <<"  "<< cell <<"\n";
+    out <<"  ]\n";
+  }
+  if (hr.__isset.scanner)
+    out <<" scanner="<< hr.scanner;
+
+  if (hr.__isset.mutator)
+    out <<" mutator="<< hr.mutator;
+
+  return out <<'}';
+}
+
+std::ostream &operator<<(std::ostream &out, const HqlResultAsArrays &hr) {
+  out <<"{HqlResultAsArrays:";
 
   if (hr.__isset.results) {
     out <<" results=[";

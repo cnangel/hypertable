@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Copyright 2008 Doug Judd (Zvents, Inc.)
+# Copyright (C) 2007-2012 Hypertable, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ export HYPERTABLE_HOME=$(cd `dirname "$0"`/.. && pwd)
 
 usage() {
   echo ""
-  echo "usage: start-dfsbroker.sh [OPTIONS] (local|hadoop|kfs|ceph) [<global-args>]"
+  echo "usage: start-dfsbroker.sh [OPTIONS] (local|hadoop|mapr|kfs|ceph) [<global-args>]"
   echo ""
   echo "OPTIONS:"
   echo "  --valgrind  run broker with valgrind"
@@ -89,10 +89,10 @@ if [ -e $HYPERTABLE_HOME/run/last-dfs ] ; then
         dfs_conflict_error $LAST_DFS $DFS
         exit 1
     fi
+else
+    # record last DFS
+    echo $DFS > $HYPERTABLE_HOME/run/last-dfs
 fi
-
-# record last DFS
-echo $DFS > $HYPERTABLE_HOME/run/last-dfs
 
 set_start_vars DfsBroker.$DFS
 check_pidfile $pidfile && exit 0
@@ -105,6 +105,8 @@ if [ $? != 0 ] ; then
       exit 1
     fi
     exec_server jrun org.hypertable.DfsBroker.hadoop.main --verbose "$@"
+  elif [ "$DFS" == "mapr" ] ; then
+    exec_server maprBroker --verbose "$@"
   elif [ "$DFS" == "kfs" ] ; then
     exec_server kosmosBroker --verbose "$@"
   elif [ "$DFS" == "ceph" ] ; then

@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -44,12 +44,17 @@ namespace Hypertable {
   class Schema : public ReferenceCount {
   public:
     struct ColumnFamily {
-      ColumnFamily() : name(), ag(), id(0), max_versions(0), ttl(0), generation(0),
-                       deleted(false), renamed(false), new_name(), counter(false) { return; }
+      ColumnFamily() : name(), ag(), id(0), max_versions(0), 
+        time_order_desc(false), time_order_desc_set(false), 
+        ttl(0), generation(0), deleted(false), renamed(false), 
+        new_name(), counter(false) { return; }
+
       String   name;
       String   ag;
       uint32_t id;
       uint32_t max_versions;
+      bool time_order_desc;
+      bool time_order_desc_set;
       time_t   ttl;
       uint32_t generation;
       bool deleted;
@@ -76,11 +81,11 @@ namespace Hypertable {
 
     typedef std::vector<AccessGroup *> AccessGroups;
 
-    Schema(bool read_ids=false);
+    Schema();
     Schema(const Schema &src_schema);
     ~Schema();
 
-    static Schema *new_instance(const String &buf, int len, bool read_ids=false);
+    static Schema *new_instance(const String &buf, int len);
 
     static void parse_compressor(const String &spec, PropertiesPtr &);
     void validate_compressor(const String &spec);
@@ -98,6 +103,7 @@ namespace Hypertable {
     void set_column_family_parameter(const char *param, const char *value);
 
     void assign_ids();
+    bool need_id_assignment() { return m_need_id_assignment; }
 
     void render(String &output, bool with_ids=false);
 
@@ -188,7 +194,7 @@ namespace Hypertable {
     AccessGroups   m_access_groups;
     AccessGroup   *m_open_access_group;
     ColumnFamily  *m_open_column_family;
-    bool           m_read_ids;
+    bool           m_need_id_assignment;
     bool           m_output_ids;
     size_t         m_max_column_family_id;
     String         m_compressor;

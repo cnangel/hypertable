@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -43,8 +43,10 @@ namespace Hypertable {
           m_prioritizer = &m_prioritizer_low_memory;
       }
       else {
-        if (m_prioritizer != &m_prioritizer_log_cleanup)
+        if (m_prioritizer != &m_prioritizer_log_cleanup) {
           m_prioritizer = &m_prioritizer_log_cleanup;
+          boost::xtime_get(&m_last_low_memory, TIME_UTC);
+        }
       }
     }
 
@@ -54,11 +56,15 @@ namespace Hypertable {
 
   private:
 
+    int get_level(RangePtr &range);
+
     bool low_memory_mode() {
       return m_prioritizer == &m_prioritizer_low_memory;
     }
 
-    Mutex m_mutex;
+    void check_file_dump_statistics(boost::xtime now, RangeStatsVector &range_data,
+                                    const String &header_str);
+
     bool m_initialized;
     bool m_scheduling_needed;
     ApplicationQueuePtr m_app_queue;
@@ -70,7 +76,13 @@ namespace Hypertable {
     MaintenancePrioritizerLowMemory  m_prioritizer_low_memory;
     int32_t m_maintenance_interval;
     boost::xtime m_last_maintenance;
+    boost::xtime m_last_low_memory;
+    boost::xtime m_last_check;
     int64_t m_query_cache_memory;
+    int32_t m_low_memory_limit_percentage;
+    int32_t m_merging_delay;
+    int32_t m_merges_per_interval;
+    int32_t m_move_compactions_per_interval;
   };
 
   typedef intrusive_ptr<MaintenanceScheduler> MaintenanceSchedulerPtr;

@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -47,6 +47,7 @@ ClientKeepaliveHandler::ClientKeepaliveHandler(Comm *comm, PropertiesPtr &cfg,
   HT_TRY("getting config values",
     m_verbose = cfg->get_bool("Hypertable.Verbose");
     m_hyperspace_port = cfg->get_i16("Hyperspace.Replica.Port");
+    m_datagram_send_port = cfg->get_i16("Hyperspace.Client.Datagram.SendPort");
     m_lease_interval = cfg->get_i32("Hyperspace.Lease.Interval");
     m_keep_alive_interval = cfg->get_i32("Hyperspace.KeepAlive.Interval");
     m_reconnect = cfg->get_bool("Hyperspace.Session.Reconnect"));
@@ -55,7 +56,7 @@ ClientKeepaliveHandler::ClientKeepaliveHandler(Comm *comm, PropertiesPtr &cfg,
   boost::xtime_get(&m_jeopardy_time, boost::TIME_UTC);
   xtime_add_millis(m_jeopardy_time, m_lease_interval);
 
-  m_local_addr = InetAddr(INADDR_ANY, 0);
+  m_local_addr = InetAddr(INADDR_ANY, m_datagram_send_port);
 
   DispatchHandlerPtr dhp(this);
   m_comm->create_datagram_receive_socket(m_local_addr, 0x10, dhp);
@@ -414,7 +415,7 @@ void ClientKeepaliveHandler::expire_session() {
     boost::xtime_get(&m_jeopardy_time, boost::TIME_UTC);
     xtime_add_millis(m_jeopardy_time, m_lease_interval);
 
-    m_local_addr = InetAddr(INADDR_ANY, 0);
+    m_local_addr = InetAddr(INADDR_ANY, m_datagram_send_port);
 
     DispatchHandlerPtr dhp(this);
     m_comm->create_datagram_receive_socket(m_local_addr, 0x10, dhp);

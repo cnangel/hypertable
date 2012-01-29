@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2010 Sanjit Jhala (Hypertable, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -120,10 +120,10 @@ public class RowOutputFormat
       try {
         // Flush remaining buffer to ThriftBroker
         if (!mSerializedCellsWriter.isEmpty()) {
-          mClient.set_cells_serialized(mMutator, mSerializedCellsWriter.buffer(), false);
+          mClient.mutator_set_cells_serialized(mMutator, mSerializedCellsWriter.buffer(), false);
         }
 
-        mClient.close_mutator(mMutator, true);
+        mClient.close_mutator(mMutator);
         mClient.close_namespace(mNamespace);
       }
       catch (Exception e) {
@@ -142,7 +142,7 @@ public class RowOutputFormat
 
         // if buffer is full flush to ThriftBroker and clear
         if (!added) {
-          mClient.set_cells_serialized(mMutator, mSerializedCellsWriter.buffer(), false);
+          mClient.mutator_set_cells_serialized(mMutator, mSerializedCellsWriter.buffer(), false);
 
           // this Row is larger than the buffer, increase buffer size
           if (cells.length > mSerializedCellsWriter.capacity())

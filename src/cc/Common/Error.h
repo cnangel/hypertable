@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -75,6 +75,12 @@ namespace Hypertable {
       NAMESPACE_DOES_NOT_EXIST           = 40,
       BAD_NAMESPACE                      = 41,
       NAMESPACE_EXISTS                   = 42,
+      NO_RESPONSE                        = 43,
+      NOT_ALLOWED                        = 44,
+      INDUCED_FAILURE                    = 45,
+      SERVER_SHUTTING_DOWN               = 46,
+      LOCATION_UNASSIGNED                = 47,
+      ALREADY_EXISTS                     = 48,
 
       CONFIG_BAD_ARGUMENT               = 1001,
       CONFIG_BAD_CFG_FILE               = 1002,
@@ -85,7 +91,7 @@ namespace Hypertable {
       COMM_BROKEN_CONNECTION         = 0x00010002,
       COMM_CONNECT_ERROR             = 0x00010003,
       COMM_ALREADY_CONNECTED         = 0x00010004,
-      //COMM_REQUEST_TIMEOUT           = 0x00010005,
+
       COMM_SEND_ERROR                = 0x00010006,
       COMM_RECEIVE_ERROR             = 0x00010007,
       COMM_POLL_ERROR                = 0x00010008,
@@ -160,6 +166,8 @@ namespace Hypertable {
       MASTER_BAD_COLUMN_FAMILY               = 0x00040007,
       MASTER_SCHEMA_GENERATION_MISMATCH      = 0x00040008,
       MASTER_LOCATION_ALREADY_ASSIGNED       = 0x00040009,
+      MASTER_LOCATION_INVALID                = 0x0004000A,
+      MASTER_OPERATION_IN_PROGRESS           = 0x0004000B,
 
       RANGESERVER_GENERATION_MISMATCH    = 0x00050001,
       RANGESERVER_RANGE_ALREADY_LOADED   = 0x00050002,
@@ -188,12 +196,13 @@ namespace Hypertable {
       RANGESERVER_RANGE_BUSY             = 0x00050019,
       RANGESERVER_BAD_CELL_INTERVAL      = 0x0005001A,
       RANGESERVER_SHORT_CELLSTORE_READ   = 0x0005001B,
+      RANGESERVER_RANGE_NOT_ACTIVE       = 0x0005001C,
 
       HQL_BAD_LOAD_FILE_FORMAT  = 0x00060001,
 
       METALOG_VERSION_MISMATCH  = 0x00070001,
       METALOG_BAD_RS_HEADER     = 0x00070002,
-      METALOG_BAD_M_HEADER      = 0x00070003,
+      METALOG_BAD_HEADER        = 0x00070003,
       METALOG_ENTRY_TRUNCATED   = 0x00070004,
       METALOG_CHECKSUM_MISMATCH = 0x00070005,
       METALOG_ENTRY_BAD_TYPE    = 0x00070006,
@@ -205,11 +214,13 @@ namespace Hypertable {
 
       THRIFTBROKER_BAD_SCANNER_ID         = 0x00090001,
       THRIFTBROKER_BAD_MUTATOR_ID         = 0x00090002,
-      THRIFTBROKER_BAD_NAMESPACE_ID       = 0x00090003
+      THRIFTBROKER_BAD_NAMESPACE_ID       = 0x00090003,
+      THRIFTBROKER_BAD_FUTURE_ID          = 0x00090004
 
     };
 
     const char *get_text(int error);
+    void generate_html_error_code_documentation(std::ostream &out);
 
   } // namespace Error
 

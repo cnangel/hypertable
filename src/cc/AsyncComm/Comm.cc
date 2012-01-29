@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -70,6 +70,8 @@ Comm::Comm() {
     HT_ABORT;
   }
 
+  InetAddr::initialize(&m_local_addr, System::net_info().primary_addr.c_str(), 0);
+
   ReactorFactory::get_reactor(m_timer_reactor);
   m_handler_map = ReactorRunner::handler_map;
 }
@@ -82,11 +84,11 @@ Comm::~Comm() {
   foreach(IOHandler *handler, handlers)
     handler->shutdown();
 
-  // Since Comm is a singleton, this is OK
-  ReactorFactory::destroy();
-
   // wait for all decomissioned handlers to get purged by Reactor
   m_handler_map->wait_for_empty();
+
+  // Since Comm is a singleton, this is OK
+  ReactorFactory::destroy();
 }
 
 
@@ -111,6 +113,12 @@ Comm::connect(const CommAddress &addr, DispatchHandlerPtr &default_handler) {
   if ((sd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0) {
     HT_ERRORF("socket: %s", strerror(errno));
     return Error::COMM_SOCKET_ERROR;
+  }
+
+  // bind socket to local address
+  if ((bind(sd, (const sockaddr *)&m_local_addr, sizeof(sockaddr_in))) < 0) {
+    HT_ERRORF( "bind: %s: %s", m_local_addr.format().c_str(), strerror(errno));
+    return Error::COMM_BIND_ERROR;
   }
 
   return connect_socket(sd, addr, default_handler);
@@ -158,9 +166,9 @@ void Comm::listen(const CommAddress &addr, ConnectionHandlerFactoryPtr &chf) {
 }
 
 
-int Comm::add_proxy(const String &proxy, const InetAddr &addr) {
+int Comm::add_proxy(const String &proxy, const String &hostname, const InetAddr &addr) {
   HT_ASSERT(ReactorFactory::proxy_master);
-  return m_handler_map->add_proxy(proxy, addr);
+  return m_handler_map->add_proxy(proxy, hostname, addr);
 }
 
 void Comm::get_proxy_map(ProxyMapT &proxy_map) {
@@ -240,6 +248,9 @@ Comm::send_request(const CommAddress &addr, uint32_t timeout_ms,
 int Comm::send_request(IOHandlerDataPtr &data_handler, uint32_t timeout_ms,
 		       CommBufPtr &cbuf, DispatchHandler *resp_handler) {
   int error;
+
+  if (timeout_ms == 0)
+    HT_THROW(Error::REQUEST_TIMEOUT, "Request with timeout of 0");
 
   cbuf->header.flags |= CommHeader::FLAGS_BIT_REQUEST;
   if (resp_handler == 0) {

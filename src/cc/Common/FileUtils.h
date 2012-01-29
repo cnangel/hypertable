@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2007 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -22,10 +22,13 @@
 #define HYPERTABLE_FDUTILS_H
 
 extern "C" {
+#include <dirent.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 }
 #include "Common/String.h"
+
+#include <vector>
 
 namespace Hypertable {
 
@@ -46,13 +49,19 @@ namespace Hypertable {
     static ssize_t recv(int fd, void *vptr, size_t n);
     static void set_flags(int fd, int flags);
     static char *file_to_buffer(const String &fname, off_t *lenp);
+    static String file_to_string(const String &fname);
+    static void *mmap(const String &fname, off_t *lenp);
     static bool mkdirs(const String &dirname);
     static bool exists(const String &fname);
     static bool unlink(const String &fname);
+    static bool rename(const String &oldpath, const String &newpath);
     static uint64_t size(const String &fname);
     static off_t length(const String &fname);
     static void add_trailing_slash(String &path);
     static bool expand_tilde(String &fname);
+    static void readdir(const String &dirname, const String &fname_regex,
+			std::vector<struct dirent> &listing);
+
 #ifdef HT_XATTR_ENABLED
     static int
     getxattr(const String &path, const String &name, void *value, size_t size);

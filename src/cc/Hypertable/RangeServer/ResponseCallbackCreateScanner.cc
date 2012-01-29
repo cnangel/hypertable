@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -26,27 +26,35 @@ using namespace Hypertable;
 
 int
 ResponseCallbackCreateScanner::response(short moreflag, int32_t id,
-                                        StaticBuffer &ext) {
+                StaticBuffer &ext, 
+                int32_t skipped_rows, int32_t skipped_cells) {
   CommHeader header;
   header.initialize_from_request_header(m_event_ptr->header);
-  CommBufPtr cbp(new CommBuf( header, 10, ext));
+  CommBufPtr cbp(new CommBuf( header, 18, ext));
   cbp->append_i32(Error::OK);
   cbp->append_i16(moreflag);
-  cbp->append_i32(id);   // scanner ID
+  cbp->append_i32(id);              // scanner ID
+  cbp->append_i32(skipped_rows);    // for OFFSET
+  cbp->append_i32(skipped_cells);   // for CELL_OFFSET
+
   return m_comm->send_response(m_event_ptr->addr, cbp);
 }
 
 
 int
-ResponseCallbackCreateScanner::response(short moreflag, int32_t id, 
-					boost::shared_array<uint8_t> &ext_buffer,
-					uint32_t ext_len) {
+ResponseCallbackCreateScanner::response(short moreflag, int32_t id,
+                boost::shared_array<uint8_t> &ext_buffer,
+                uint32_t ext_len, int32_t skipped_rows, 
+                int32_t skipped_cells) {
   CommHeader header;
   header.initialize_from_request_header(m_event_ptr->header);
-  CommBufPtr cbp(new CommBuf( header, 10, ext_buffer, ext_len));
+  CommBufPtr cbp(new CommBuf( header, 18, ext_buffer, ext_len));
   cbp->append_i32(Error::OK);
   cbp->append_i16(moreflag);
-  cbp->append_i32(id);   // scanner ID
+  cbp->append_i32(id);              // scanner ID
+  cbp->append_i32(skipped_rows);    // for OFFSET
+  cbp->append_i32(skipped_cells);   // for CELL_OFFSET
+
   return m_comm->send_response(m_event_ptr->addr, cbp);
 }
 

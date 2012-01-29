@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -142,7 +142,7 @@ namespace Hyperspace {
 
   class BerkeleyDbFilesystem {
   public:
-    BerkeleyDbFilesystem(PropertiesPtr &props, String localhost,
+    BerkeleyDbFilesystem(PropertiesPtr &props,
                          const String &basedir,
                          const vector<Thread::id> &thread_ids,
                          bool force_recover=false);
@@ -198,6 +198,9 @@ namespace Hyperspace {
     void create(BDbTxn &txn, const String &fname, bool temp);
     void get_directory_listing(BDbTxn &txn, String fname,
                                std::vector<DirEntry> &listing);
+    void get_directory_attr_listing(BDbTxn &txn, String fname, const String &aname,
+                                    bool include_sub_entries,
+                                    std::vector<DirEntryAttr> &listing);
     void get_directory_attr_listing(BDbTxn &txn, String fname, const String &aname,
                                     std::vector<DirEntryAttr> &listing);
     void get_all_names(BDbTxn &txn, std::vector<String> &names);
@@ -703,7 +706,7 @@ namespace Hyperspace {
      * Initialize per worker thread DB handles
      */
     void init_db_handles(const vector<Thread::id> &thread_ids);
-
+    BDbHandlesPtr get_db_handles();
     void build_attr_key(BDbTxn &, String &keystr,
                         const String &aname, Dbt &key);
     static void db_event_callback(DbEnv *dbenv, uint32_t which, void *info);

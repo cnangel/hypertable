@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -25,6 +25,9 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.util.Properties;
 import java.util.logging.Logger;
+
+import org.apache.hadoop.fs.FileSystem;
+
 import org.hypertable.AsyncComm.ApplicationQueue;
 import org.hypertable.AsyncComm.Comm;
 import org.hypertable.AsyncComm.ConnectionHandlerFactory;
@@ -57,7 +60,8 @@ public class main {
     };
 
 
-    static final String DEFAULT_PORT = "38030";
+    static final int DEFAULT_PORT = 38030;
+    static final short DEFAULT_WORKERS = 20;
 
     private static HdfsBroker ms_broker;
     private static ApplicationQueue ms_app_queue;
@@ -68,6 +72,12 @@ public class main {
             java.lang.System.out.println("ShutdownHook called");
             ms_broker.mOpenFileMap.RemoveAll();
             ms_app_queue.Shutdown();
+	    try {
+		FileSystem.closeAll();
+	    }
+	    catch (IOException e) {
+		e.printStackTrace();
+	    }
         }
     }
 
@@ -125,8 +135,15 @@ public class main {
             props.setProperty("verbose", "true");
 
         // Determine listen port
-        str  = props.getProperty("HdfsBroker.Port", DEFAULT_PORT);
-        port = Integer.parseInt(str);
+        port = DEFAULT_PORT;
+        if (props.contains("DfsBroker.Port")) {
+          str  = props.getProperty("DfsBroker.Port");
+          port = Integer.parseInt(str);
+        }
+        if (props.contains("HdfsBroker.Port")) {
+          str  = props.getProperty("HdfsBroker.Port");
+          port = Integer.parseInt(str);
+        }
 
         // Determine reactor count
         str = props.getProperty("HdfsBroker.Reactors");
@@ -135,7 +152,7 @@ public class main {
 
         // Determine worker count
         str = props.getProperty("HdfsBroker.Workers");
-        workerCount = (str == null) ? (short)System.processorCount
+        workerCount = (str == null) ? DEFAULT_WORKERS
                                     : Integer.parseInt(str);
 
         if (verbose) {

@@ -1,11 +1,11 @@
 /** -*- C++ -*-
- * Copyright (C) 2007 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -45,16 +45,20 @@ namespace Hypertable {
   public:
 
     IOHandlerData(int sd, const InetAddr &addr, DispatchHandlerPtr &dhp, bool connected=false)
-      : IOHandler(sd, addr, dhp), m_send_queue() {
+      : IOHandler(sd, addr, dhp), m_event(0), m_send_queue() {
       m_connected = connected;
       reset_incoming_message_state();
     }
 
+    virtual ~IOHandlerData() {
+      delete m_event;
+    }
+
     void reset_incoming_message_state() {
       m_got_header = false;
-      m_event = new Event(Event::MESSAGE, m_addr);
+      m_event = 0;
       m_message_header_ptr = m_message_header;
-      m_message_header_remaining = m_event->header.fixed_length();
+      m_message_header_remaining = CommHeader::FIXED_LENGTH;
       m_message = 0;
       m_message_ptr = 0;
       m_message_remaining = 0;
@@ -66,18 +70,14 @@ namespace Hypertable {
     int flush_send_queue();
 
     // define default poll() interface for everyone since it is chosen at runtime
-    virtual bool handle_event(struct pollfd *event, clock_t arrival_clocks,
-			      time_t arival_time=0);
+    virtual bool handle_event(struct pollfd *event, time_t arival_time=0);
 
 #if defined(__APPLE__) || defined(__FreeBSD__)
-    virtual bool handle_event(struct kevent *event, clock_t arrival_clocks,
-			      time_t arival_time=0);
+    virtual bool handle_event(struct kevent *event, time_t arival_time=0);
 #elif defined(__linux__)
-    virtual bool handle_event(struct epoll_event *event, clock_t arrival_clocks,
-			      time_t arival_time=0);
+    virtual bool handle_event(struct epoll_event *event, time_t arival_time=0);
 #elif defined(__sun__)
-    virtual bool handle_event(port_event_t *event, clock_t arrival_clocks,
-			      time_t arival_time=0);
+    virtual bool handle_event(port_event_t *event, time_t arival_time=0);
 #else
     ImplementMe;
 #endif
@@ -85,7 +85,7 @@ namespace Hypertable {
     bool handle_write_readiness();
 
   private:
-    void handle_message_header(clock_t arrival_clocks, time_t arrival_time);
+    void handle_message_header(time_t arrival_time);
     void handle_message_body();
     void handle_disconnect(int error = Error::OK);
 

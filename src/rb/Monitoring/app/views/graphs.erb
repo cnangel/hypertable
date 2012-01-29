@@ -2,13 +2,15 @@
             <script type='text/javascript'>
               //<![CDATA[
                 window.addEvent('domready', function() {
-                  var graph = new RSGraph('graph','RangeServer','servers','','', {
+                  var graph = new RSGraph('graph','<%=@stype%>','servers','','', {
                     width: 900,
                     height: 220,
                     gridWidth: 800,
                     gridHeight: 200,
                     shade: false,
-                    selected_rs: "<%=@server%>"
+                    selected_rs: "<%=@server%>",
+                    start_time: "<%=@start_time%>",
+                    end_time: "<%=@end_time%>"
                   });
 
                 });

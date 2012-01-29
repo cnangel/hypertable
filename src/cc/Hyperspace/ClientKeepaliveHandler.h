@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2007 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -101,6 +101,7 @@ namespace Hyperspace {
     static const uint64_t ms_bad_notification_grace_period = 120000;
     bool m_reconnect;
     uint16_t m_hyperspace_port;
+    uint16_t m_datagram_send_port;
     std::vector<String> m_hyperspace_replicas;
   };
 

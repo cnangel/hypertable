@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2010 Sanjit Jhala (Hypertable, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -38,21 +38,22 @@ TableCache::TableCache(PropertiesPtr &props, RangeLocatorPtr &range_locator,
 
 }
 
-TablePtr TableCache::get(const String &table_name, bool force) {
+TablePtr TableCache::get(const String &table_name, int32_t flags) {
   ScopedLock lock(m_mutex);
   String id;
 
   TableMap::iterator it = m_table_map.find(table_name);
   if (it != m_table_map.end()) {
-    if (force || it->second->need_refresh())
+    if ((flags & Table::OPEN_FLAG_REFRESH_TABLE_CACHE) || it->second->need_refresh())
       it->second->refresh();
-
     return it->second;
   }
 
   TablePtr table = new Table(m_props, m_range_locator, m_conn_manager, m_hyperspace,
-                             m_app_queue, m_namemap, table_name, m_timeout_ms);
+                             m_app_queue, m_namemap, table_name, flags, m_timeout_ms);
+
   m_table_map.insert(make_pair(table_name, table));
+
   return table;
 }
 

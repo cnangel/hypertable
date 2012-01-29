@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2007 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -21,6 +21,7 @@
 
 #include "Common/Compat.h"
 
+#include <limits>
 #include "Common/Error.h"
 
 #include "CommBuf.h"
@@ -33,7 +34,13 @@ using namespace Hypertable;
 int ResponseCallback::error(int error, const String &msg) {
   CommHeader header;
   header.initialize_from_request_header(m_event_ptr->header);
-  CommBufPtr cbp(Protocol::create_error_message(header, error, msg.c_str()));
+  CommBufPtr cbp;
+  size_t max_msg_size = std::numeric_limits<int16_t>::max();
+  if (msg.length() < max_msg_size)
+    cbp = Protocol::create_error_message(header, error, msg.c_str());
+  else {
+    cbp = Protocol::create_error_message(header, error, msg.substr(0, max_msg_size).c_str());
+  }
   return m_comm->send_response(m_event_ptr->addr, cbp);
 }
 

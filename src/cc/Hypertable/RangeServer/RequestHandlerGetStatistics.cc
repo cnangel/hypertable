@@ -1,12 +1,12 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Donald <donaldliew@gmail.com>
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -35,13 +35,9 @@ using namespace Hypertable;
  */
 void RequestHandlerGetStatistics::run() {
   ResponseCallbackGetStatistics cb(m_comm, m_event_ptr);
-  const uint8_t *decode_ptr = m_event_ptr->payload;
-  size_t decode_remain = m_event_ptr->payload_len;
 
   try {
-    bool all = decode_bool(&decode_ptr, &decode_remain);
-    bool snapshot = decode_bool(&decode_ptr, &decode_remain);
-    m_range_server->get_statistics(&cb, all, snapshot);
+    m_range_server->get_statistics(&cb);
   }
   catch (Exception &e) {
     HT_ERROR_OUT << e << HT_END;

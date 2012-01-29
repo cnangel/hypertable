@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -24,16 +24,17 @@
 
 #include <cassert>
 #include <list>
+#include <map>
 #include <vector>
 
 #include <boost/thread/condition.hpp>
 
 #include "Common/Thread.h"
 #include "Common/Mutex.h"
-#include "Common/Logger.h"
 #include "Common/HashMap.h"
 #include "Common/ReferenceCount.h"
 #include "Common/StringExt.h"
+#include "Common/Logger.h"
 
 #include "ApplicationHandler.h"
 
@@ -68,13 +69,13 @@ namespace Hypertable {
 
     class ApplicationQueueState {
     public:
-      ApplicationQueueState() : shutdown(false), paused(false) { return; }
+      ApplicationQueueState() : threads_available(0), shutdown(false), paused(false) { return; }
       WorkQueue           queue;
       WorkQueue           urgent_queue;
       UsageRecMap         usage_map;
-      Mutex               queue_mutex;
-      Mutex               usage_mutex;
+      Mutex               mutex;
       boost::condition    cond;
+      size_t              threads_available;
       bool                shutdown;
       bool                paused;
     };
@@ -82,103 +83,139 @@ namespace Hypertable {
     class Worker {
 
     public:
-      Worker(ApplicationQueueState &qstate) : m_state(qstate) { return; }
+      Worker(ApplicationQueueState &qstate, bool one_shot=false) 
+      : m_state(qstate), m_one_shot(one_shot) { return; }
 
       void operator()() {
         WorkRec *rec = 0;
         WorkQueue::iterator iter;
 
         while (true) {
+          {
+            ScopedLock lock(m_state.mutex);
 
-          {  // !!! maybe ditch this block specifier
-            ScopedLock lock(m_state.queue_mutex);
-
+            m_state.threads_available++;
             while ((m_state.paused || m_state.queue.empty()) &&
                    m_state.urgent_queue.empty()) {
-              if (m_state.shutdown)
+              if (m_state.shutdown) {
+                m_state.threads_available--;
                 return;
+              }
               m_state.cond.wait(lock);
             }
 
-            {
-              ScopedLock ulock(m_state.usage_mutex);
+            rec = 0;
 
+            iter = m_state.urgent_queue.begin();
+            while (iter != m_state.urgent_queue.end()) {
+              rec = (*iter);
+              if (!rec->handler || rec->handler->expired()) {
+                iter = m_state.urgent_queue.erase(iter);
+                remove_expired(rec);
+                continue;
+              }
+              if (rec->usage == 0 || !rec->usage->running) {
+                if (rec->usage)
+                  rec->usage->running = true;
+                m_state.urgent_queue.erase(iter);
+                break;
+              }
               rec = 0;
+              iter++;
+            }
 
-              iter = m_state.urgent_queue.begin();
-              while (iter != m_state.urgent_queue.end()) {
+            if (rec == 0 && !m_state.paused) {
+              iter = m_state.queue.begin();
+              while (iter != m_state.queue.end()) {
                 rec = (*iter);
-                if (rec->handler->expired()) {
-                  iter = m_state.urgent_queue.erase(iter);
+                if (!rec->handler || rec->handler->expired()) {
+                  iter = m_state.queue.erase(iter);
+                  remove_expired(rec);
                   continue;
                 }
                 if (rec->usage == 0 || !rec->usage->running) {
                   if (rec->usage)
                     rec->usage->running = true;
-                  m_state.urgent_queue.erase(iter);
+                  m_state.queue.erase(iter);
                   break;
                 }
                 rec = 0;
                 iter++;
               }
+            }
 
-              if (rec == 0 && !m_state.paused) {
-                iter = m_state.queue.begin();
-                while (iter != m_state.queue.end()) {
-                  rec = (*iter);
-                  if (rec->handler->expired()) {
-                    iter = m_state.queue.erase(iter);
-                    continue;
-                  }
-                  if (rec->usage == 0 || !rec->usage->running) {
-                    if (rec->usage)
-                      rec->usage->running = true;
-                    m_state.queue.erase(iter);
-                    break;
-                  }
-                  rec = 0;
-                  iter++;
-                }
+            if (rec == 0 && !m_one_shot) {
+              if (m_state.shutdown) {
+                m_state.threads_available--;
+                return;
+              }
+              m_state.cond.wait(lock);
+              if (m_state.shutdown) {
+                m_state.threads_available--;
+                return;
               }
             }
-            if (rec == 0) {
-              if (m_state.shutdown)
-                return;
-              m_state.cond.wait(lock);
-              if (m_state.shutdown)
-                return;
-            }
+
+            m_state.threads_available--;
           }
 
           if (rec) {
-            rec->handler->run();
-            if (rec->usage) {
-              ScopedLock ulock(m_state.usage_mutex);
-              rec->usage->running = false;
-              rec->usage->outstanding--;
-              if (rec->usage->outstanding == 0) {
-                m_state.usage_map.erase(rec->usage->thread_group);
-                delete rec->usage;
-              }
-            }
-            delete rec;
+            if (rec->handler)
+              rec->handler->run();
+            remove(rec);
+            if (m_one_shot)
+              return;
           }
+          else if (m_one_shot)
+            return;
         }
 
         HT_INFO("thread exit");
       }
 
     private:
+
+      void remove(WorkRec *rec) {
+        if (rec->usage) {
+          ScopedLock ulock(m_state.mutex);
+          rec->usage->running = false;
+          rec->usage->outstanding--;
+          if (rec->usage->outstanding == 0) {
+            m_state.usage_map.erase(rec->usage->thread_group);
+            delete rec->usage;
+          }
+        }
+        delete rec;
+      }
+
+      void remove_expired(WorkRec *rec) {
+        if (rec->usage) {
+          rec->usage->outstanding--;
+          if (rec->usage->outstanding == 0) {
+            m_state.usage_map.erase(rec->usage->thread_group);
+            delete rec->usage;
+          }
+        }
+        delete rec;
+      }
+
       ApplicationQueueState &m_state;
+      bool m_one_shot;
     };
 
     Mutex                  m_mutex;
     ApplicationQueueState  m_state;
     ThreadGroup            m_threads;
-    bool joined;
     std::vector<Thread::id>     m_thread_ids;
+    bool joined;
+    bool m_dynamic_threads;
 
   public:
+
+    /**
+     * Default ctor used by derived classes only
+     */
+    ApplicationQueue() : joined(true) {}
 
     /**
      * Constructor to set up the application queue.  It creates a number
@@ -186,7 +223,8 @@ namespace Hypertable {
      *
      * @param worker_count number of worker threads to create
      */
-    ApplicationQueue(int worker_count) : joined(false) {
+    ApplicationQueue(int worker_count, bool dynamic_threads=true) 
+      : joined(false), m_dynamic_threads(dynamic_threads) {
       Worker Worker(m_state);
       assert (worker_count > 0);
       for (int i=0; i<worker_count; ++i) {
@@ -195,7 +233,7 @@ namespace Hypertable {
       //threads
     }
 
-    ~ApplicationQueue() {
+    virtual ~ApplicationQueue() {
       if (!joined) {
         shutdown();
         join();
@@ -206,7 +244,7 @@ namespace Hypertable {
      * Return all the thread ids for this threadgroup
      *
      */
-    std::vector<Thread::id> get_thread_ids() const {
+    virtual std::vector<Thread::id> get_thread_ids() const {
       return m_thread_ids;
     }
 
@@ -215,7 +253,7 @@ namespace Hypertable {
      * out and then all threads exit.  #join can be called to wait for
      * completion of the shutdown.
      */
-    void shutdown() {
+    virtual void shutdown() {
       m_state.shutdown = true;
       m_state.cond.notify_all();
     }
@@ -225,7 +263,7 @@ namespace Hypertable {
      * application queue threads exit.
      */
 
-    void join() {
+    virtual void join() {
       ScopedLock lock(m_mutex);
       if (!joined) {
         m_threads.join_all();
@@ -233,13 +271,13 @@ namespace Hypertable {
       }
     }
 
-    void stop() {
-      ScopedLock lock(m_state.queue_mutex);
+    virtual void stop() {
+      ScopedLock lock(m_state.mutex);
       m_state.paused = true;
     }
 
-    void start() {
-      ScopedLock lock(m_state.queue_mutex);
+    virtual void start() {
+      ScopedLock lock(m_state.mutex);
       m_state.paused = false;
       m_state.cond.notify_all();
     }
@@ -251,7 +289,7 @@ namespace Hypertable {
      * ApplicationHandler.  This thread group ID is constructed in the Event
      * object
      */
-    void add(ApplicationHandler *app_handler) {
+    virtual void add(ApplicationHandler *app_handler) {
       UsageRecMap::iterator uiter;
       uint64_t thread_group = app_handler->get_thread_group();
       WorkRec *rec = new WorkRec(app_handler);
@@ -260,7 +298,7 @@ namespace Hypertable {
       HT_ASSERT(app_handler);
 
       if (thread_group != 0) {
-        ScopedLock ulock(m_state.usage_mutex);
+        ScopedLock ulock(m_state.mutex);
         if ((uiter = m_state.usage_map.find(thread_group))
             != m_state.usage_map.end()) {
           rec->usage = (*uiter).second;
@@ -274,13 +312,22 @@ namespace Hypertable {
       }
 
       {
-        ScopedLock lock(m_state.queue_mutex);
-        if (app_handler->is_urgent())
+        ScopedLock lock(m_state.mutex);
+        if (app_handler->is_urgent()) {
           m_state.urgent_queue.push_back(rec);
+          if (m_dynamic_threads && m_state.threads_available == 0) {
+            Worker worker(m_state, true);
+            Thread t(worker);
+          }
+        }
         else
           m_state.queue.push_back(rec);
         m_state.cond.notify_one();
       }
+    }
+
+    virtual void add_unlocked(ApplicationHandler *app_handler) {
+      add(app_handler);
     }
   };
 

@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -31,33 +31,43 @@ using namespace Hyperspace;
 
 namespace Hypertable {
 
+  Mutex                  Global::mutex;
   SessionPtr             Global::hyperspace = 0;
-  Filesystem            *Global::dfs = 0;
-  Filesystem            *Global::log_dfs = 0;
+  FilesystemPtr          Global::dfs;
+  FilesystemPtr          Global::log_dfs;
   MaintenanceQueuePtr    Global::maintenance_queue;
   RangeServerProtocol   *Global::protocol = 0;
+  RangeLocatorPtr        Global::range_locator = 0;
   bool                   Global::verbose = false;
   CommitLog             *Global::user_log = 0;
+  CommitLog             *Global::system_log = 0;
   CommitLog             *Global::metadata_log = 0;
   CommitLog             *Global::root_log = 0;
-  RangeServerMetaLog    *Global::range_log = 0;
+  MetaLog::WriterPtr     Global::rsml_writer;
   std::string            Global::log_dir = "";
+  LocationInitializerPtr Global::location_initializer;
   int64_t                Global::range_split_size = 0;
   int64_t                Global::range_maximum_size = 0;
   int32_t                Global::access_group_garbage_compaction_threshold = 0;
-  int32_t                Global::access_group_max_files = 0;
-  int32_t                Global::access_group_merge_files = 0;
   int32_t                Global::access_group_max_mem = 0;
   int32_t                Global::cell_cache_scanner_cache_size = 0;
   ScannerMap             Global::scanner_map;
   FileBlockCache        *Global::block_cache = 0;
   TablePtr               Global::metadata_table = 0;
+  TablePtr               Global::rs_metrics_table = 0;
   int64_t                Global::range_metadata_split_size = 0;
   MemoryTracker         *Global::memory_tracker = 0;
   int64_t                Global::log_prune_threshold_min = 0;
   int64_t                Global::log_prune_threshold_max = 0;
+  int64_t                Global::cellstore_target_size_min = 0;
+  int64_t                Global::cellstore_target_size_max = 0;
   int64_t                Global::memory_limit = 0;
+  int64_t                Global::memory_limit_ensure_unused = 0;
+  int64_t                Global::memory_limit_ensure_unused_current = 0;
   uint64_t               Global::access_counter = 0;
   bool                   Global::enable_shadow_cache = true;
   std::string            Global::toplevel_dir;
+  int32_t                Global::metrics_interval = 0;
+  int32_t                Global::merge_cellstore_run_length_threshold = 0;
+  bool                   Global::ignore_clock_skew_errors = false;
 }

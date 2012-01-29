@@ -1,10 +1,10 @@
-# Copyright (C) 2009  Luke Lu (llu@hypertable.org)
+# Copyright (C) 2007-2012 Hypertable, Inc.
 #
 # This file is part of Hypertable.
 #
 # Hypertable is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
-# as published by the Free Software Foundation; either version 2
+# as published by the Free Software Foundation; either version 3
 # of the License, or any later version.
 #
 # Hypertable is distributed in the hope that it will be useful,
@@ -20,9 +20,17 @@
 if (VERSION_ADD_COMMIT_SUFFIX)
   exec_program(${HYPERTABLE_SOURCE_DIR}/bin/src-utils/ver ${HYPERTABLE_SOURCE_DIR}
                ARGS "--commit-only" OUTPUT_VARIABLE HT_COMMIT_STRING)
-  set(VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_MICRO}.${VERSION_PATCH}.${HT_COMMIT_STRING})
+  if (VERSION_MISC_SUFFIX)
+    set(VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_MICRO}.${VERSION_PATCH}.${VERSION_MISC_SUFFIX}.${HT_COMMIT_STRING})
+  else ()
+    set(VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_MICRO}.${VERSION_PATCH}.${HT_COMMIT_STRING})
+  endif ()
 else ()
-  set(VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_MICRO}.${VERSION_PATCH})
+  if (VERSION_MISC_SUFFIX)
+    set(VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_MICRO}.${VERSION_PATCH}.${VERSION_MISC_SUFFIX})
+  else ()
+    set(VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_MICRO}.${VERSION_PATCH})
+  endif ()
 endif ()
 
 
@@ -35,4 +43,4 @@ else ()
   set(HT_VCS_STRING "exported")
 endif ()
 
-set(VERSION_STRING "Hypertable ${VERSION} (${HT_VCS_STRING})")
+set(VERSION_STRING "${VERSION} (${HT_VCS_STRING})")

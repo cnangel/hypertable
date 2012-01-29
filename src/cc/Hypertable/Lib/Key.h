@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -35,27 +35,24 @@
 
 
 namespace Hypertable {
-
-  static const uint32_t FLAG_DELETE_ROW            = 0x00;
-  static const uint32_t FLAG_DELETE_COLUMN_FAMILY  = 0x01;
-  static const uint32_t FLAG_DELETE_CELL           = 0x02;
-  static const uint32_t FLAG_INSERT                = 0xFF;
-
   /** Provides access to internal components of opaque key.
    */
   class Key {
   public:
 
-    static const uint8_t HAVE_REVISION  = 0x80;
-    static const uint8_t HAVE_TIMESTAMP = 0x40;
-    static const uint8_t AUTO_TIMESTAMP = 0x20;
-    static const uint8_t REV_IS_TS      = 0x10;
+    static const uint8_t HAVE_REVISION      =  0x80;
+    static const uint8_t HAVE_TIMESTAMP     =  0x40;
+    static const uint8_t AUTO_TIMESTAMP     =  0x20;
+    static const uint8_t REV_IS_TS          =  0x10;
+    static const uint8_t TS_CHRONOLOGICAL   =   0x1;
 
     static const char *END_ROW_MARKER;
     static const char *END_ROOT_ROW;
 
-    static inline void encode_ts64(uint8_t **bufp, int64_t val) {
-      val = ~val;
+    static inline void encode_ts64(uint8_t **bufp, int64_t val,
+            bool ascending=true) {
+      if (ascending)
+        val = ~val;
 #ifdef HT_LITTLE_ENDIAN
       *(*bufp)++ = (uint8_t)(val >> 56);
       *(*bufp)++ = (uint8_t)(val >> 48);
@@ -71,7 +68,8 @@ namespace Hypertable {
 #endif
     }
 
-    static inline int64_t decode_ts64(const uint8_t **bufp) {
+    static inline int64_t decode_ts64(const uint8_t **bufp, 
+            bool ascending=true) {
       int64_t val;
 #ifdef HT_LITTLE_ENDIAN
       val = ((int64_t)*(*bufp)++ << 56);
@@ -86,7 +84,7 @@ namespace Hypertable {
       memcpy(&val, *bufp, 8);
       *bufp += 8;
 #endif
-      return ~val;
+      return (ascending ? ~val : val);
     }
 
     /**
@@ -123,7 +121,7 @@ namespace Hypertable {
     }
 
     SerializedKey  serial;
-    uint32_t       length;
+    uint32_t       length;  // length of serialized key
     uint8_t        flag;
     uint8_t        control;
     uint8_t        column_family_code;
@@ -156,29 +154,6 @@ namespace Hypertable {
     os << key;
     return os;
   }
-
-
-  /**
-   * Builds an opaque key from a set of key components.  This function allocates
-   * memory for the key an then packs the components into the key so that keys
-   * can be lexicographically compared.  The opaque key has the following
-   * packed format:
-   * <p>
-   * [rowkey][column-family][column-qualifier][flag][~BIGENDIAN(timestamp)]
-   * <p>
-   * @param flag DELETE_ROW, DELETE_CELL, or INSERT
-   * @param row NUL-terminated row key
-   * @param column_family_code column family
-   * @param column_qualifier NUL-terminated column qualifier
-   * @param timestamp timestamp in microseconds
-   * @param revision
-   * @return newly allocated opaque key
-   */
-  ByteString create_key(uint8_t flag, const char *row,
-                        uint8_t column_family_code,
-                        const char *column_qualifier,
-                        int64_t timestamp = AUTO_ASSIGN,
-                        int64_t revision = AUTO_ASSIGN);
 
   void create_key_and_append(DynamicBuffer &dst_buf, const char *row);
 

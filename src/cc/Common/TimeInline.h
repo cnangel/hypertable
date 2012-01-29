@@ -1,11 +1,11 @@
 /** -*- C++ -*-
- * Copyright (C) 2008  Luke Lu (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -63,10 +63,10 @@ parse_ts(const char *ts) {
     return timegm(&tv) * G;
 
   HT_DELIM_CHECK(*last, ' ');
-  tv.tm_hour = strtol(last + 1, &last, 10) - 1;
+  tv.tm_hour = strtol(last + 1, &last, 10);
   HT_RANGE_CHECK(tv.tm_hour, 0, 23);
   HT_DELIM_CHECK(*last, ':');
-  tv.tm_min = strtol(last + 1, &last, 10) - 1;
+  tv.tm_min = strtol(last + 1, &last, 10);
   HT_RANGE_CHECK(tv.tm_min, 0, 59);
 
   if (*last == 0)
@@ -74,9 +74,9 @@ parse_ts(const char *ts) {
 
   HT_DELIM_CHECK(*last, ':');
 
-  sec = strtod(last+1, &last) - 1;
+  sec = strtod(last+1, &last);
   tv.tm_sec = 0;
-  HT_RANGE_CHECK(sec, 0, 60);
+  HT_RANGE_CHECK(sec, 0, 59);
   // integer nanoseconds
   if (*last == ':') {
     ns = strtol(last+1, &last, 10);

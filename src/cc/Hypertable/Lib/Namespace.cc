@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -53,22 +53,6 @@ using namespace Hypertable;
 using namespace Hyperspace;
 using namespace Config;
 
-#define HT_NAMESPACE_REQ_BEGIN \
-  do { \
-    try
-
-#define HT_NAMESPACE_REQ_END \
-    catch (Exception &e) { \
-      if (!m_refresh_schema || (e.code() != Error::RANGESERVER_GENERATION_MISMATCH && \
-          e.code() != Error::MASTER_SCHEMA_GENERATION_MISMATCH)) \
-        throw; \
-      HT_WARNF("%s - %s", Error::get_text(e.code()), e.what()); \
-      refresh_table(table_name); /* name must be defined in calling context */\
-      continue; \
-    } \
-    break; \
-  } while (true)
-
 
 Namespace::Namespace(const String &name, const String &id, PropertiesPtr &props,
     ConnectionManagerPtr &conn_manager, Hyperspace::SessionPtr &hyperspace,
@@ -83,7 +67,6 @@ Namespace::Namespace(const String &name, const String &id, PropertiesPtr &props,
             m_master_client && m_range_locator && m_table_cache);
 
   m_hyperspace_reconnect = m_props->get_bool("Hyperspace.Session.Reconnect");
-  m_refresh_schema = m_props->get_bool("Hypertable.Client.RefreshSchema");
   m_toplevel_dir = m_props->get_str("Hypertable.Directory");
   canonicalize(&m_toplevel_dir);
   m_toplevel_dir = (String) "/" + m_toplevel_dir;
@@ -134,85 +117,86 @@ void Namespace::alter_table(const String &table_name, const String &alter_schema
   Schema::AccessGroup *final_ag;
   Schema::ColumnFamily *final_cf;
   String final_schema_str;
-  TablePtr table = open_table(table_name);
+  TablePtr table = open_table(table_name, Table::OPEN_FLAG_BYPASS_TABLE_CACHE);
 
-  HT_NAMESPACE_REQ_BEGIN {
-    schema = table->schema();
-    alter_schema = Schema::new_instance(alter_schema_str, alter_schema_str.length());
-    if (!alter_schema->is_valid())
-      HT_THROW(Error::BAD_SCHEMA, alter_schema->get_error_string());
+  schema = table->schema();
+  alter_schema = Schema::new_instance(alter_schema_str, alter_schema_str.length());
+  if (!alter_schema->is_valid())
+    HT_THROW(Error::BAD_SCHEMA, alter_schema->get_error_string());
 
-    final_schema = new Schema(*(schema.get()));
-    final_schema->incr_generation();
+  final_schema = new Schema(*(schema.get()));
+  final_schema->incr_generation();
 
-    foreach(Schema::AccessGroup *alter_ag, alter_schema->get_access_groups()) {
-      // create a new access group if needed
-      if(!final_schema->access_group_exists(alter_ag->name)) {
-        final_ag = new Schema::AccessGroup();
-        final_ag->name = alter_ag->name;
-        final_ag->in_memory = alter_ag->in_memory;
-        final_ag->blocksize = alter_ag->blocksize;
-        final_ag->compressor = alter_ag->compressor;
-        final_ag->bloom_filter = alter_ag->bloom_filter;
-        if (!final_schema->add_access_group(final_ag)) {
-          String error_msg = final_schema->get_error_string();
-          delete final_ag;
-          HT_THROW(Error::BAD_SCHEMA, error_msg);
-        }
-      }
-      else {
-        final_ag = final_schema->get_access_group(alter_ag->name);
+  foreach(Schema::AccessGroup *alter_ag, alter_schema->get_access_groups()) {
+    // create a new access group if needed
+    if(!final_schema->access_group_exists(alter_ag->name)) {
+      final_ag = new Schema::AccessGroup();
+      final_ag->name = alter_ag->name;
+      final_ag->in_memory = alter_ag->in_memory;
+      final_ag->blocksize = alter_ag->blocksize;
+      final_ag->compressor = alter_ag->compressor;
+      final_ag->bloom_filter = alter_ag->bloom_filter;
+      if (!final_schema->add_access_group(final_ag)) {
+        String error_msg = final_schema->get_error_string();
+        delete final_ag;
+        HT_THROW(Error::BAD_SCHEMA, error_msg);
       }
     }
-
-    // go through each column family to be altered
-    foreach(Schema::ColumnFamily *alter_cf, alter_schema->get_column_families()) {
-      if (alter_cf->deleted) {
-        if (!final_schema->drop_column_family(alter_cf->name))
-          HT_THROW(Error::BAD_SCHEMA, final_schema->get_error_string());
-      }
-      else if (alter_cf->renamed) {
-        if (!final_schema->rename_column_family(alter_cf->name, alter_cf->new_name))
-          HT_THROW(Error::BAD_SCHEMA, final_schema->get_error_string());
-      }
-      else {
-        // add column family
-        if(final_schema->get_max_column_family_id() >= Schema::ms_max_column_id)
-          HT_THROW(Error::TOO_MANY_COLUMNS, (String)"Attempting to add > "
-                   + Schema::ms_max_column_id
-                   + (String) " column families to table");
-        final_schema->incr_max_column_family_id();
-        final_cf = new Schema::ColumnFamily(*alter_cf);
-        final_cf->id = (uint32_t) final_schema->get_max_column_family_id();
-        final_cf->generation = final_schema->get_generation();
-
-        if(!final_schema->add_column_family(final_cf)) {
-          String error_msg = final_schema->get_error_string();
-          delete final_cf;
-          HT_THROW(Error::BAD_SCHEMA, error_msg);
-        }
-      }
+    else {
+      final_ag = final_schema->get_access_group(alter_ag->name);
     }
-
-    final_schema->render(final_schema_str, true);
-    m_master_client->alter_table(full_name, final_schema_str);
   }
-  HT_NAMESPACE_REQ_END;
+
+  // go through each column family to be altered
+  foreach(Schema::ColumnFamily *alter_cf, alter_schema->get_column_families()) {
+    if (alter_cf->deleted) {
+      if (!final_schema->drop_column_family(alter_cf->name))
+        HT_THROW(Error::BAD_SCHEMA, final_schema->get_error_string());
+    }
+    else if (alter_cf->renamed) {
+      if (!final_schema->rename_column_family(alter_cf->name, alter_cf->new_name))
+        HT_THROW(Error::BAD_SCHEMA, final_schema->get_error_string());
+    }
+    else {
+      // add column family
+      if(final_schema->get_max_column_family_id() >= Schema::ms_max_column_id)
+        HT_THROW(Error::TOO_MANY_COLUMNS, (String)"Attempting to add > "
+                 + Schema::ms_max_column_id
+                 + (String) " column families to table");
+      final_schema->incr_max_column_family_id();
+      final_cf = new Schema::ColumnFamily(*alter_cf);
+      final_cf->id = (uint32_t) final_schema->get_max_column_family_id();
+      final_cf->generation = final_schema->get_generation();
+
+      if(!final_schema->add_column_family(final_cf)) {
+        String error_msg = final_schema->get_error_string();
+        delete final_cf;
+        HT_THROW(Error::BAD_SCHEMA, error_msg);
+      }
+    }
+  }
+
+  final_schema->render(final_schema_str, true);
+  m_master_client->alter_table(full_name, final_schema_str);
+
 }
 
 
-TablePtr Namespace::open_table(const String &table_name, bool force) {
+TablePtr Namespace::open_table(const String &table_name, int32_t flags) {
   String full_name = get_full_name(table_name);
-
-  return m_table_cache->get(full_name, force);
+  return _open_table(full_name, flags);
 }
 
-TablePtr Namespace::_open_table(const String &full_name, bool force) {
-  return m_table_cache->get(full_name, force);
+TablePtr Namespace::_open_table(const String &full_name, int32_t flags) {
+  if (flags & Table::OPEN_FLAG_BYPASS_TABLE_CACHE)
+    return new Table(m_props, m_range_locator, m_conn_manager, m_hyperspace,
+                     m_app_queue, m_namemap, full_name, flags, m_timeout_ms);
+  else
+    return m_table_cache->get(full_name, flags);
 }
 
 void Namespace::refresh_table(const String &table_name) {
-  open_table(table_name, true);
+  open_table(table_name, Table::OPEN_FLAG_REFRESH_TABLE_CACHE);
 }
 
 bool Namespace::exists_table(const String &table_name) {
@@ -229,15 +213,8 @@ bool Namespace::exists_table(const String &table_name) {
 
   String table_file = m_toplevel_dir + "/tables/" + table_id;
 
-  DynamicBuffer value_buf(0);
-  Hyperspace::HandleCallbackPtr null_handle_callback;
-  uint64_t handle = 0;
-
-  HT_ON_SCOPE_EXIT(&Hyperspace::close_handle_ptr, m_hyperspace, &handle);
-
   try {
-    handle = m_hyperspace->open(table_file, OPEN_FLAG_READ, null_handle_callback);
-    if (!m_hyperspace->attr_exists(handle, "x"))
+    if (!m_hyperspace->attr_exists(table_file, "x"))
       return false;
   }
   catch(Exception &e) {
@@ -293,15 +270,12 @@ void Namespace::rename_table(const String &old_name, const String &new_name) {
 void Namespace::drop_table(const String &table_name, bool if_exists) {
   String full_name = get_full_name(table_name);
 
-  HT_NAMESPACE_REQ_BEGIN {
-    m_master_client->drop_table(full_name, if_exists);
-  }
-  HT_NAMESPACE_REQ_END;
+  m_master_client->drop_table(full_name, if_exists);
   m_table_cache->remove(full_name);
 }
 
-void Namespace::get_listing(std::vector<NamespaceListing> &listing) {
-  m_namemap->id_to_sublisting(m_id, listing);
+void Namespace::get_listing(bool include_sub_entries, std::vector<NamespaceListing> &listing) {
+  m_namemap->id_to_sublisting(m_id, include_sub_entries, listing);
 }
 
 
@@ -321,6 +295,8 @@ void Namespace::get_table_splits(const String &table_name, TableSplitsContainer 
   ProxyMapT proxy_map;
   String full_name = get_full_name(table_name);
 
+  try_again:
+
   table = open_table(table_name);
 
   table->get(tid, schema);
@@ -330,6 +306,7 @@ void Namespace::get_table_splits(const String &table_name, TableSplitsContainer 
   sprintf(start_row, "%s:", tid.id);
   sprintf(end_row, "%s:%s", tid.id, Key::END_ROW_MARKER);
 
+  scan_spec.clear();
   scan_spec.row_limit = 0;
   scan_spec.max_versions = 1;
   scan_spec.columns.clear();
@@ -344,7 +321,12 @@ void Namespace::get_table_splits(const String &table_name, TableSplitsContainer 
 
   m_comm->get_proxy_map(proxy_map);
 
+  bool refresh=true;
+  tsbuilder.clear();
+  splits.clear();
+  last_row.clear();
   while (scanner_ptr->next(cell)) {
+    refresh = false;
     if (strcmp(last_row.c_str(), cell.row_key) && last_row != "") {
       const char *ptr = strchr(last_row.c_str(), ':');
       HT_ASSERT(ptr);
@@ -354,11 +336,17 @@ void Namespace::get_table_splits(const String &table_name, TableSplitsContainer 
     }
     if (!strcmp(cell.column_family, "Location")) {
       str = String((const char *)cell.value, cell.value_len);
+      if (str == "!") {
+        refresh = true;
+        break;
+      }
       boost::trim(str);
       tsbuilder.set_location(str);
       ProxyMapT::iterator pmiter = proxy_map.find(str);
-      if (pmiter != proxy_map.end())
-	tsbuilder.set_ip_address( (*pmiter).second.format_ipaddress() );
+      if (pmiter != proxy_map.end()) {
+        tsbuilder.set_ip_address( (*pmiter).second.addr.format_ipaddress() );
+        tsbuilder.set_hostname( (*pmiter).second.hostname );
+      }
     }
     else if (!strcmp(cell.column_family, "StartRow")) {
       str = String((const char *)cell.value, cell.value_len);
@@ -369,7 +357,10 @@ void Namespace::get_table_splits(const String &table_name, TableSplitsContainer 
       HT_FATALF("Unexpected column family - %s", cell.column_family);
     last_row = cell.row_key;
   }
-
+  if (refresh) {
+    refresh_table(table_name);
+    goto try_again;
+  }
   tsbuilder.set_end_row(Key::END_ROW_MARKER);
   splits.push_back(tsbuilder.get());
 

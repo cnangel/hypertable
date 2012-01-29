@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -24,6 +24,7 @@
 #include <cstdio>
 #include <stdexcept>
 #include <set>
+#include <map>
 
 #include "Common/String.h"
 #include "HashMap.h"
@@ -31,12 +32,17 @@
 
 typedef std::set<std::string> StringSet;
 
+
 /** STL Strict Weak Ordering for comparing c-style strings. */
 struct LtCstr {
   bool operator()(const char* s1, const char* s2) const {
     return strcmp(s1, s2) < 0;
   }
 };
+
+typedef std::set<const char *, LtCstr>  CstrSet;
+
+typedef std::map<const char *, int32_t, LtCstr>  CstrToInt32Map;
 
 inline std::string operator+(const std::string& s1, short sval) {
   char cbuf[8];

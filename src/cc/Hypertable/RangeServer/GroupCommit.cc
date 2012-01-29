@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2010 Doug Judd (Hypertable, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -31,7 +31,7 @@ using namespace Hypertable::Config;
 GroupCommit::GroupCommit(RangeServer *range_server) : m_range_server(range_server), m_counter(0) {
 
   m_commit_interval = get_i32("Hypertable.RangeServer.CommitInterval");
-  
+
 }
 
 
@@ -40,6 +40,7 @@ void GroupCommit::add(EventPtr &event, SchemaPtr &schema, const TableIdentifier 
   ScopedLock lock(m_mutex);
   TableUpdateMap::iterator iter;
   UpdateRequest *request = new UpdateRequest();
+  boost::xtime expire_time = event->expiration_time();
 
   request->buffer = buffer;
   request->count = count;
@@ -57,12 +58,15 @@ void GroupCommit::add(EventPtr &event, SchemaPtr &schema, const TableIdentifier 
     tu->commit_iteration = (tu->commit_interval+(m_commit_interval-1)) / m_commit_interval;
     tu->total_count = count;
     tu->total_buffer_size = buffer.size;
+    tu->expire_time = expire_time;
     tu->requests.push_back(request);
-    
+
     m_table_map[tid] = tu;
     return;
   }
 
+  if (expire_time.sec > (*iter).second->expire_time.sec)
+    (*iter).second->expire_time = expire_time;
   (*iter).second->total_count += count;
   (*iter).second->total_buffer_size += buffer.size;
   (*iter).second->requests.push_back(request);
@@ -73,6 +77,10 @@ void GroupCommit::add(EventPtr &event, SchemaPtr &schema, const TableIdentifier 
 void GroupCommit::trigger() {
   ScopedLock lock(m_mutex);
   std::vector<TableUpdate *> updates;
+  boost::xtime expire_time;
+
+  // Clear to Jan 1, 1970
+  memset(&expire_time, 0, sizeof(expire_time));
 
   m_counter++;
 
@@ -80,6 +88,8 @@ void GroupCommit::trigger() {
   while (iter != m_table_map.end()) {
     if ((m_counter % (*iter).second->commit_iteration) == 0) {
       TableUpdateMap::iterator remove_iter = iter;
+      if (iter->second->expire_time.sec > expire_time.sec)
+	expire_time = iter->second->expire_time;
       ++iter;
       updates.push_back((*remove_iter).second);
       m_table_map.erase(remove_iter);
@@ -88,15 +98,7 @@ void GroupCommit::trigger() {
       ++iter;
   }
 
-  if (!updates.empty()) {
-    m_range_server->batch_update(updates);
-
-    // Free objects
-    foreach (TableUpdate *table_update, updates) {
-      foreach (UpdateRequest *request, table_update->requests)
-        delete request;
-      delete table_update;
-    }
-  }
+  if (!updates.empty())
+    m_range_server->batch_update(updates, expire_time);
 
 }

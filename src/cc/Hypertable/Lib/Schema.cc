@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -72,7 +72,7 @@ Mutex desc_mutex;
 bool desc_inited = false;
 
 PropertiesDesc
-  compressor_desc("  bmz|lzo|quicklz|zlib|none [compressor_options]\n\n"
+  compressor_desc("  bmz|lzo|quicklz|zlib|snappy|none [compressor_options]\n\n"
       "compressor_options"),
   bloom_filter_desc("  rows|rows+cols|none [bloom_filter_options]\n\n"
       "  Default bloom filter is defined by the config property:\n"
@@ -95,7 +95,8 @@ void init_schema_options_desc() {
     ("offset", i16()->default_value(0), "Starting fingerprint offset for bmz")
     ;
   compressor_hidden_desc.add_options()
-    ("compressor-type", str(), "Compressor type (bmz|lzo|quicklz|zlib|none)")
+    ("compressor-type", str(), 
+        "Compressor type (bmz|lzo|quicklz|zlib|snappy|none)")
     ;
   compressor_pos_desc.add("compressor-type", 1);
 
@@ -119,10 +120,10 @@ void init_schema_options_desc() {
 } // local namespace
 
 
-Schema::Schema(bool read_ids)
+Schema::Schema()
   : m_error_string(), m_next_column_id(0), m_access_group_map(),
-    m_column_family_map(), m_generation(1), m_access_groups(),
-    m_open_access_group(0), m_open_column_family(0), m_read_ids(read_ids),
+    m_column_family_map(), m_generation(0), m_access_groups(),
+    m_open_access_group(0), m_open_column_family(0), m_need_id_assignment(false),
     m_output_ids(false), m_max_column_family_id(0), m_counter_flags(0),
     m_group_commit_interval(0) {
 }
@@ -140,7 +141,7 @@ Schema::Schema(const Schema &src_schema)
   m_group_commit_interval = src_schema.m_group_commit_interval;
   m_next_column_id = src_schema.m_next_column_id;
   m_max_column_family_id = src_schema.m_max_column_family_id;
-  m_read_ids = src_schema.m_read_ids;
+  m_need_id_assignment = src_schema.m_need_id_assignment;
   m_output_ids = src_schema.m_output_ids;
   m_counter_flags = src_schema.m_counter_flags;
 
@@ -176,14 +177,14 @@ Schema::~Schema() {
 }
 
 
-Schema *Schema::new_instance(const String &buf, int len, bool read_ids) {
+Schema *Schema::new_instance(const String &buf, int len) {
   ScopedLock lock(ms_mutex);
   XML_Parser parser = XML_ParserCreate("US-ASCII");
 
   XML_SetElementHandler(parser, &start_element_handler, &end_element_handler);
   XML_SetCharacterDataHandler(parser, &character_data_handler);
 
-  ms_schema = new Schema(read_ids);
+  ms_schema = new Schema();
 
   if (XML_Parse(parser, buf.c_str(), len, 1) == 0) {
     String errstr = (String)"Schema Parse Error: "
@@ -293,7 +294,7 @@ void Schema::start_element_handler(void *userdata,
     for (i=0; atts[i] != 0; i+=2) {
       if (atts[i+1] == 0)
         return;
-      if (ms_schema->m_read_ids && !strcasecmp(atts[i], "generation"))
+      if (!strcasecmp(atts[i], "generation"))
         ms_schema->set_generation(atts[i+1]);
       else if (!strcasecmp(atts[i], "compressor"))
         ms_schema->set_compressor((String)atts[i+1]);
@@ -323,7 +324,8 @@ void Schema::start_element_handler(void *userdata,
   else if (!strcasecmp(name, "MaxVersions") || !strcasecmp(name, "ttl")
            || !strcasecmp(name, "Name") || !strcasecmp(name, "Generation")
            || !strcasecmp(name, "deleted") || !strcasecmp(name, "renamed")
-           || !strcasecmp(name, "NewName") || !strcasecmp(name, "Counter"))
+           || !strcasecmp(name, "NewName") || !strcasecmp(name, "Counter")
+           || !strcasecmp(name, "TimeOrder"))
     ms_collected_text = "";
   else
     ms_schema->set_error_string(format("Unrecognized element - '%s'", name));
@@ -340,7 +342,8 @@ void Schema::end_element_handler(void *userdata, const XML_Char *name) {
   else if (!strcasecmp(name, "MaxVersions") || !strcasecmp(name, "ttl")
            || !strcasecmp(name, "Name") || !strcasecmp(name, "Generation")
            || !strcasecmp(name, "deleted") || !strcasecmp(name, "renamed")
-           || !strcasecmp(name, "NewName") || !strcasecmp(name, "Counter")) {
+           || !strcasecmp(name, "NewName") || !strcasecmp(name, "Counter")
+           || !strcasecmp(name, "TimeOrder")) {
     boost::trim(ms_collected_text);
     ms_schema->set_column_family_parameter(name, ms_collected_text.c_str());
   }
@@ -410,18 +413,16 @@ void Schema::close_column_family() {
   else {
     if (m_open_column_family->name == "")
       set_error_string((string)"ColumnFamily must have Name child element");
-    else if (m_read_ids && m_open_column_family->id == 0) {
-      set_error_string((String)"No id specified for ColumnFamily '"
-                        + m_open_column_family->name + "'");
-    }
     else {
+      if (m_open_column_family->id == 0)
+        m_need_id_assignment = true;
       if (m_column_family_map.find(m_open_column_family->name)
           != m_column_family_map.end())
         set_error_string((string)"Multiply defined column families '"
                           + m_open_column_family->name + "'");
       else {
         m_column_family_map[m_open_column_family->name] = m_open_column_family;
-        if (m_read_ids) {
+        if (m_open_column_family->id != 0) {
           m_column_family_id_map[m_open_column_family->id] =
               m_open_column_family;
           if (m_open_column_family->counter) {
@@ -530,13 +531,19 @@ void Schema::set_column_family_parameter(const char *param, const char *value) {
         set_error_string((String)"Invalid value (" + value
                           + ") for MaxVersions");
     }
+    else if (!strcasecmp(param, "TimeOrder")) {
+      if (!strcasecmp(value, "desc"))
+        m_open_column_family->time_order_desc = true;
+      else
+        m_open_column_family->time_order_desc = false;
+    }
     else if (!strcasecmp(param, "Counter")) {
       if (!strcasecmp(value, "true"))
         m_open_column_family->counter = true;
       else
         m_open_column_family->counter = false;
     }
-    else if (m_read_ids && !strcasecmp(param, "id")) {
+    else if (!strcasecmp(param, "id")) {
       m_open_column_family->id = atoi(value);
       if (m_open_column_family->id == 0)
         set_error_string((String)"Invalid value (" + value
@@ -544,13 +551,11 @@ void Schema::set_column_family_parameter(const char *param, const char *value) {
       if (m_open_column_family->id > m_max_column_family_id)
         m_max_column_family_id = m_open_column_family->id;
     }
-    else if (m_read_ids && !strcasecmp(param, "Generation")) {
+    else if (!strcasecmp(param, "Generation")) {
       m_open_column_family->generation = atoi(value);
       if (m_open_column_family->generation == 0)
-        m_open_column_family->generation = m_generation;
+        m_need_id_assignment = true;
     }
-
-
     else
       set_error_string(format("Invalid ColumnFamily parameter '%s'", param));
   }
@@ -558,20 +563,59 @@ void Schema::set_column_family_parameter(const char *param, const char *value) {
 
 
 void Schema::assign_ids() {
-  m_max_column_family_id = 0;
+  bool need_assignment = false;
+  size_t max_column_family_id = 0;
+  uint32_t generation = 0;
 
-  m_generation = 1;
+  /**
+   * Sanity check and determine if ID assignment is necessary
+   */
+  foreach(ColumnFamily *cf, m_column_families) {
+    if (cf->generation == 0) {
+      need_assignment = true;
+      if (cf->id != 0)
+        HT_THROW(Error::SCHEMA_PARSE_ERROR,
+                 format("Column '%s' has ID %d but unassigned generation",
+                        cf->name.c_str(), (int)cf->id));
+    }
+    else {
+      if (cf->id == 0)
+        HT_THROW(Error::SCHEMA_PARSE_ERROR,
+                 format("Column '%s' has empty ID with generation %d",
+                        cf->name.c_str(), (int)cf->generation));
+      if (cf->generation > m_generation)
+        HT_THROW(Error::SCHEMA_PARSE_ERROR, 
+                 format("Column '%s' has newer generation (%d) than schema generation (%d)",
+                        cf->name.c_str(), (int)cf->generation, (int)m_generation));
+      if (cf->generation > generation)
+        generation = cf->generation;
+    }
+    if (cf->id == 0)
+      need_assignment = true;
+    if (cf->id > max_column_family_id)
+      max_column_family_id = cf->id;
+  }
+
+  if (!need_assignment)
+    return;
+
+  m_max_column_family_id = max_column_family_id;
+  if (m_generation == 0)
+    m_generation = 1;
+
   m_output_ids=true;
   foreach(ColumnFamily *cf, m_column_families) {
-    cf->id = ++m_max_column_family_id;
-    if (cf->generation == 0)
+    if (cf->id == 0) {
+      cf->id = ++m_max_column_family_id;
       cf->generation = m_generation;
+    }
     if (cf->counter) {
       if (m_counter_flags.empty())
         m_counter_flags.resize(256);
       m_counter_flags[cf->id] = 1;
     }
   }
+  m_need_id_assignment = false;
 }
 
 
@@ -637,6 +681,8 @@ void Schema::render(String &output, bool with_ids) {
       if (cf->max_versions != 0)
         output += format("      <MaxVersions>%u</MaxVersions>\n",
                          cf->max_versions);
+      if (cf->time_order_desc)
+        output += format("      <TimeOrder>DESC</TimeOrder>\n");
 
       if (cf->ttl != 0)
         output += format("      <ttl>%d</ttl>\n", (int)cf->ttl);
@@ -669,7 +715,11 @@ void Schema::render_hql_create_table(const String &table_name, String &output) {
   if (m_group_commit_interval > 0)
     output += format("GROUP_COMMIT_INTERVAL=\"%u\" ", m_group_commit_interval);
 
-  output += table_name + " (\n";
+  if (hql_needs_quotes(table_name.c_str()))
+    output += "'" + table_name + "'";
+  else
+    output += table_name;
+  output += " (\n";
 
   foreach(const ColumnFamily *cf, m_column_families) {
     // don't display deleted cfs
@@ -683,6 +733,9 @@ void Schema::render_hql_create_table(const String &table_name, String &output) {
 
     if (cf->max_versions != 0)
       output += format(" MAX_VERSIONS=%u", cf->max_versions);
+
+    if (cf->time_order_desc)
+      output += format(" TIME_ORDER DESC");
 
     if (cf->counter)
       output += format(" COUNTER");
@@ -838,7 +891,6 @@ bool Schema::access_group_exists(const String &name) const
 
 bool Schema::rename_column_family(const String &old_name, const String &new_name) {
   ColumnFamily *cf;
-  uint32_t cf_id;
   ColumnFamilyMap::iterator cf_map_it;
   ColumnFamilies::iterator cfs_it;
   ColumnFamilies::iterator ag_cfs_it;
@@ -852,7 +904,6 @@ bool Schema::rename_column_family(const String &old_name, const String &new_name
 
   if(old_name != new_name) {
     cf = cf_map_it->second;
-    cf_id = cf->id;
     cf->name = new_name;
     pair<ColumnFamilyMap::iterator, bool> res =
         m_column_family_map.insert(make_pair(cf->name, cf));
@@ -868,7 +919,6 @@ bool Schema::rename_column_family(const String &old_name, const String &new_name
 
 bool Schema::drop_column_family(const String &name) {
   ColumnFamily *cf;
-  uint32_t cf_id;
   ColumnFamilyMap::iterator cf_map_it = m_column_family_map.find(name);
   ColumnFamilies::iterator cfs_it;
   ColumnFamilies::iterator ag_cfs_it;
@@ -880,7 +930,6 @@ bool Schema::drop_column_family(const String &name) {
   }
 
   cf = cf_map_it->second;
-  cf_id = cf->id;
   AccessGroupMap::const_iterator ag_it = m_access_group_map.find(cf->ag);
 
   if (ag_it == m_access_group_map.end()) {

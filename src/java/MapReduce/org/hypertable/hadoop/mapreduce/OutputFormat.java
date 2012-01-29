@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2010 Sanjit Jhala (Hypertable, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -82,8 +82,8 @@ public class OutputFormat extends org.apache.hadoop.mapreduce.OutputFormat<KeyWr
         this.table = table;
         //TODO: read this from HT configs
         mClient = ThriftClient.create("localhost", 38080);
-        mNamespace = mClient.open_namespace(namespace);
-        mMutator = mClient.open_mutator(mNamespace, table, flags, flush_interval);
+        mNamespace = mClient.namespace_open(namespace);
+        mMutator = mClient.mutator_open(mNamespace, table, flags, flush_interval);
       }
       catch (Exception e) {
         log.error(e);
@@ -112,8 +112,8 @@ public class OutputFormat extends org.apache.hadoop.mapreduce.OutputFormat<KeyWr
     @Override
       public void close(TaskAttemptContext ctx) throws IOException {
       try {
-        mClient.close_mutator(mMutator, true);
-        mClient.close_namespace(mNamespace);
+        mClient.mutator_close(mMutator);
+        mClient.namespace_close(mNamespace);
       }
       catch (Exception e) {
         log.error(e);
@@ -131,7 +131,7 @@ public class OutputFormat extends org.apache.hadoop.mapreduce.OutputFormat<KeyWr
         key.convert_buffers_to_strings();
         cell.key = key;
         cell.value = ByteBuffer.wrap(value.getBytes());
-        mClient.set_cell(mMutator, cell);
+        mClient.mutator_set_cell(mMutator, cell);
       }
       catch (Exception e) {
         log.error(e);
@@ -167,7 +167,7 @@ public class OutputFormat extends org.apache.hadoop.mapreduce.OutputFormat<KeyWr
   @Override
     public void checkOutputSpecs(JobContext ctx) throws IOException {
     try {
-      //mClient.get_table_id();
+      //mClient.table_get_id();
     }
     catch (Exception e) {
       log.error(e);

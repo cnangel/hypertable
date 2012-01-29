@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2010 Sanjit Jhala (Hypertable, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -22,6 +22,7 @@
 #ifndef HYPERTABLE_NAMESPACELISTING_H
 #define HYPERTABLE_NAMESPACELISTING_H
 
+#include <vector>
 #include "Common/String.h"
 
 namespace Hypertable {
@@ -30,6 +31,8 @@ namespace Hypertable {
     String name;
     String id;
     bool is_namespace;
+
+    std::vector<NamespaceListing> sub_entries;
   };
 
   struct LtNamespaceListingName {

@@ -19,7 +19,7 @@
 <div id="head_middle">
 <div id="navigator_line">
   <span id="upper_right">
-    <img src="/images/tesseract_bigger.jpg" border=0 alt="HyperTable"/>
+    <img src="/images/tesseract_bigger.jpg" border=0 alt="Hypertable"/>
   </span>
 </div>
   <h1>Hypertable Monitoring</h1>
@@ -27,7 +27,7 @@
 <div id="navigator_line">
 <div id="navigator_line2">
 <div id="navigator_line2_menu">
-<a href="/" class=<%= nav_tab_on("index")%>>System Overview</a>&nbsp;&nbsp;|&nbsp;<a href="/tables" class=<%= nav_tab_on("tables") %>>Tables</a>&nbsp;&nbsp;|&nbsp;<a href="/rangeservers" class=<%= nav_tab_on("rangeservers")%>>Range Servers</a>&nbsp;&nbsp;|&nbsp;<a href="/graphs" class=<%= nav_tab_on("graphs")%>>Graphs</a>
+<a href="/" class=<%= nav_tab_on("index",params["type"])%>>Range Servers</a>&nbsp;&nbsp;|&nbsp;<a href="/tables" class=<%= nav_tab_on("tables",params["type"]) %>>Tables</a>
 </div>
 </div>
 </div>
@@ -36,7 +36,7 @@
 <%= yield %>
 </div>
 <div id="footer">
-<p> HyperTable </p>
+<p> Hypertable </p>
 </div>
 </body>
 </html>

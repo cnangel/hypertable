@@ -1,3 +1,24 @@
+/**
+ * Copyright (C) 2007-2012 Hypertable, Inc.
+ *
+ * This file is part of Hypertable.
+ *
+ * Hypertable is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 3
+ * of the License, or any later version.
+ *
+ * Hypertable is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
+ */
+
 #include "Common/Compat.h"
 #include "Common/InetAddr.h"
 #include "Common/Logger.h"
@@ -37,6 +58,10 @@ bool test_parse_ipv4(const char *ipstr) {
   return false;
 }
 
+bool test_is_ipv4(const char *ipstr) {
+  return InetAddr::is_ipv4(ipstr);
+}
+
 void bench_loop(uint32_t n, sockaddr_in &addr) {
   addr.sin_addr.s_addr = htonl(n);
 }
@@ -62,6 +87,17 @@ int main(int argc, char *argv[]) {
   //HT_ASSERT(test_parse_ipv4("0xa08ee01")); doesn't work on linux
   HT_ASSERT(test_parse_ipv4("127.0.0.1"));
   HT_ASSERT(test_parse_ipv4("127.0.0.1_") == false);
+
+  HT_ASSERT(test_is_ipv4("10.8.238.1"));
+  HT_ASSERT(test_is_ipv4("192.168.238.100"));
+  HT_ASSERT(test_is_ipv4("1.2.3.4"));
+  HT_ASSERT(test_is_ipv4("1491.8.1.3") == false);
+  HT_ASSERT(test_is_ipv4("149.8.1") == false);
+  HT_ASSERT(test_is_ipv4("149.8.1.2.3") == false);
+  HT_ASSERT(test_is_ipv4("700.8.1.2") == false);
+  HT_ASSERT(test_is_ipv4("12.foo.bar.com") == false);
+  HT_ASSERT(test_is_ipv4("127.0.0.1_") == false);
+  HT_ASSERT(test_is_ipv4("foo.bar.com.baz") == false);
 
   if (argc > 1) {
     size_t n = atoi(argv[1]);

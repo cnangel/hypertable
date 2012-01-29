@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2007 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -119,7 +119,7 @@ namespace Hyperspace {
           ms_bdb_fs->delete_event(txn, m_id);
           txn.commit(0);
         }
-        HT_BDBTXN_EVT_END();
+        HT_BDBTXN_EVT_END(BOOST_PP_EMPTY());
         m_cond.notify_all();
       }
     }

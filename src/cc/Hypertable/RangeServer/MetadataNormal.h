@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -24,6 +24,8 @@
 
 #include <string>
 
+#include "Common/HashMap.h"
+
 #include "Hypertable/Lib/TableScanner.h"
 #include "Hypertable/Lib/Types.h"
 
@@ -36,12 +38,23 @@ namespace Hypertable {
     MetadataNormal(const TableIdentifier *identifier, const String &end_row);
     virtual ~MetadataNormal();
     virtual void reset_files_scan();
-    virtual bool get_next_files(String &ag_name, String &files);
-    virtual void write_files(const String &ag_name, const String &files);
+    virtual bool get_next_files(String &ag_name, String &files, uint32_t *nextcsidp);
+    virtual void write_files(const String &ag_name, const String &files, int64_t total_blocks);
+    virtual void write_files(const String &ag_name, const String &files, int64_t total_blocks, uint32_t nextcsid);
 
   private:
-    TableScannerPtr         m_files_scanner;
-    String                  m_metadata_key;
+
+    class AgMetadata {
+    public:
+      AgMetadata() : nextcsid(0) { }
+      String files;
+      uint32_t nextcsid;
+    };
+    typedef hash_map<String, AgMetadata> AgMetadataMap;
+    
+    String          m_metadata_key;
+    AgMetadataMap   m_ag_map;
+    AgMetadataMap::iterator  m_ag_map_iter;
   };
 }
 

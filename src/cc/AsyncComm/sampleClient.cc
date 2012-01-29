@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2007 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -68,7 +68,6 @@ namespace {
     "OPTIONS:",
     "  --host=<name>   Specifies the host to connect to (default = localhost)",
     "  --port=<n>      Specifies the port to connect to (default = 11255)",
-    "  --reactors=<n>  Specifies the number of reactors (default=1)",
     "  --recv-addr=<addr>  Let the server connect to us by listening for",
     "                  connection request on <addr> (host:port).  The address",
     "                  that the server is connecting from should be the same",
@@ -247,7 +246,6 @@ int main(int argc, char **argv) {
   struct sockaddr_in addr;
   uint16_t port = DEFAULT_PORT;
   time_t timeout = DEFAULT_TIMEOUT;
-  int reactor_count = 1;
   const char *in_file = 0;
   int error;
   EventPtr event_ptr;
@@ -286,8 +284,6 @@ int main(int argc, char **argv) {
       timeout = (time_t)atoi(&argv[i][10]);
     else if (!strcmp(argv[i], "--udp"))
       udp_mode = true;
-    else if (!strncmp(argv[i], "--reactors=", 11))
-      reactor_count = atoi(&argv[i][11]);
     else if (!strncmp(argv[i], "--recv-addr=", 12)) {
       if (!InetAddr::initialize(&inet_addr, &argv[i][12]))
         HT_ABORT;

@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Luke Lu (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -24,6 +24,7 @@
 
 #include <vector>
 
+#include "Common/ReferenceCount.h"
 #include "Common/PageArenaAllocator.h"
 #include "Cell.h"
 
@@ -31,13 +32,28 @@ namespace Hypertable {
 
 typedef PageArenaAllocator<Cell> CellAlloc;
 typedef std::vector<Cell, CellAlloc> Cells;
+typedef std::pair<Cell, int> FailedMutation;
+typedef std::vector<FailedMutation> FailedMutations;
 
-class CellsBuilder {
+class CellsBuilder : public ReferenceCount {
 public:
   CellsBuilder(size_t size_hint = 128)
     : m_cells(CellAlloc(m_arena)), m_size_hint(size_hint) {}
 
+  size_t size() const {
+    return m_cells.size();
+  }
+
+  size_t memory_used() const {
+    return m_arena.used();
+  }
+
+  void get_cell(Cell &cc, size_t ii) {
+    cc = m_cells[ii];
+  }
+
   void add(const Cell &cell, bool own = true) {
+
     if (!m_cells.capacity())
       m_cells.reserve(m_size_hint);
 
@@ -45,6 +61,7 @@ public:
       m_cells.push_back(cell);
       return;
     }
+
     Cell copy;
 
     if (cell.row_key)
@@ -67,6 +84,7 @@ public:
     m_cells.push_back(copy);
   }
 
+  void get(Cells &cells) { cells = m_cells; }
   Cells &get() { return m_cells; }
   const Cells &get() const { return m_cells; }
 
@@ -77,11 +95,26 @@ public:
 
   void clear() { m_cells.clear(); }
 
-private:
+  void copy_failed_mutations(const FailedMutations &src, FailedMutations &dst) {
+  clear();
+  dst.clear();
+  size_t ii=0;
+  foreach(const FailedMutation &v, src) {
+    add(v.first);
+    dst.push_back(std::make_pair(m_cells[ii], v.second));
+    ++ii;
+  }
+}
+protected:
   CharArena m_arena;
   Cells m_cells;
   size_t m_size_hint;
 };
+
+typedef intrusive_ptr<CellsBuilder> CellsBuilderPtr;
+
+
+
 
 } // namespace Hypertable
 

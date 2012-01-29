@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Luke Lu (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -24,11 +24,12 @@
 #include "Common/Logger.h"
 #include "DfsBroker/Lib/Client.h"
 #include "Hypertable/Lib/Config.h"
-#include "Hypertable/Lib/RangeServerMetaLog.h"
-#include "Hypertable/Lib/RangeServerMetaLogReader.h"
-#include "Hypertable/Lib/MasterMetaLogReader.h"
+#include "Hypertable/Lib/old/RangeServerMetaLog.h"
+#include "Hypertable/Lib/old/RangeServerMetaLogReader.h"
+#include "Hypertable/Lib/old/MasterMetaLogReader.h"
 
 using namespace Hypertable;
+using namespace Hypertable::OldMetaLog;
 using namespace Config;
 
 namespace {
@@ -53,8 +54,13 @@ struct MyPolicy : Policy {
 typedef Meta::list<MyPolicy, DfsClientPolicy, DefaultCommPolicy> Policies;
 
 void dump_range_states(RangeServerMetaLogReader *rdr) {
-  const RangeStates &rstates = rdr->load_range_states();
+  bool found_recover_entry;
+  const RangeStates &rstates = rdr->load_range_states(&found_recover_entry);
 
+  if (found_recover_entry)
+    std::cout << "Found recover entry" << std::endl;
+  else
+    std::cout << "Recover entry not found" << std::endl;
   foreach(const RangeStateInfo *i, rstates) std::cout << *i;
 }
 

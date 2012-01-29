@@ -28,18 +28,18 @@ CREATE TABLE foo (
 
 DROP TABLE foo;
 DROP NAMESPACE "/test";
-Error: Master 'drop namespace' error, name=test - HYPERSPACE directory not empty
+Error: MasterClient operation drop_namespace('test', if_exists=false) failed - HYPERSPACE directory not empty
 USE "/test";
 DROP NAMESPACE "subtest";
 RENAME TABLE foo TO foo_renamed;
 GET LISTING;
 foo_renamed
 DROP TABLE foo;
-Error: Master 'drop table' error - HYPERTABLE table does not exist
+Error: MasterClient operation drop_table('test/foo', if_exists=false) failed - HYPERTABLE table does not exist
 DROP TABLE foo_renamed;
 DROP NAMESPACE "/test";
 CREATE TABLE foo('test');
-Error: Master 'create table' error, tablename=test/foo - HYPERTABLE namespace does not exist
+Error: MasterClient operation create_table('test/foo') failed - HYPERTABLE namespace does not exist
 CREATE NAMESPACE "/test";
 USE "/test";
 DROP TABLE IF EXISTS hypertable;
@@ -90,7 +90,7 @@ DROP TABLE IF EXISTS Pages_clone;
 CREATE TABLE Pages_clone LIKE Pages;
 SHOW CREATE TABLE Pages_clone;
 
-CREATE TABLE Pages_clone (
+CREATE TABLE 'Pages_clone' (
   'refer_url',
   'http_code',
   timestamp,
@@ -111,22 +111,24 @@ INSERT INTO hypertable VALUES ('2008-06-28 01:00:03', 'k1', 'a', 'a22');
 SELECT * FROM hypertable WHERE ROW = 'k1' AND TIMESTAMP < '2008-06-28 01:00:01' DISPLAY_TIMESTAMPS;
 2008-06-28 01:00:00.000000000	k1	a	a11
 2008-06-28 01:00:00.000000000	k1	b	b11
-SELECT * FROM hypertable CELL_LIMIT=1 LIMIT=1;
+SELECT a FROM hypertable WHERE ROW="k1" AND TIMESTAMP < '2008-06-28 01:00:01' DISPLAY_TIMESTAMPS CELL_LIMIT_PER_FAMILY 1;
+2008-06-28 01:00:00.000000000	k1	a	a11
+SELECT * FROM hypertable CELL_LIMIT_PER_FAMILY=1 LIMIT=1;
 k1	a	a22
 k1	b	b11
-SELECT * FROM hypertable CELL_LIMIT=1 REVS=2;
+SELECT * FROM hypertable CELL_LIMIT_PER_FAMILY=1 REVS=2;
 k1	a	a22
 k1	b	b11
 k2	a	a21
 k2	b	b22
-SELECT * FROM hypertable CELL_LIMIT=2 REVS=2;
+SELECT * FROM hypertable CELL_LIMIT_PER_FAMILY=2 REVS=2;
 k1	a	a22
 k1	a	a11
 k1	b	b11
 k2	a	a21
 k2	b	b22
 k2	b	b21
-SELECT * FROM hypertable CELL_LIMIT=1;
+SELECT * FROM hypertable CELL_LIMIT_PER_FAMILY=1;
 k1	a	a22
 k1	b	b11
 k2	a	a21
@@ -134,6 +136,12 @@ k2	b	b22
 SELECT * FROM hypertable LIMIT=1 REVS=2;
 k1	a	a22
 k1	a	a11
+k1	b	b11
+SELECT * FROM hypertable CELL_LIMIT 2;
+k1	a	a22
+k1	a	a11
+SELECT * FROM hypertable CELL_LIMIT 2 CELL_LIMIT_PER_FAMILY 1;
+k1	a	a22
 k1	b	b11
 DROP TABLE IF EXISTS hypertable;
 CREATE TABLE hypertable ( TestColumnFamily );
@@ -146,19 +154,21 @@ key3	TestColumnFamily	tcf3
 key4	TestColumnFamily	tcf4
 LOAD DATA INFILE ROW_KEY_COLUMN=rowkey "hypertable_unknown_cf.tsv" INTO TABLE hypertable;
 ERROR hypertable : caught std::exception: Bad column family 'Unknown'
-Error: line number 2 - HQL bad load file format
+ERROR hypertable : set: Hypertable::Exception: Bad column family 'Unknown' - HYPERTABLE bad key
+	at void Hypertable::TableMutatorAsync::to_full_key(const void*, const char*, const void*, int64_t, int64_t, uint8_t, Hypertable::Key&, bool&) (src/cc/Hypertable/Lib/TableMutatorAsync.cc)
+Error: line number 2 - HYPERTABLE bad key
 DROP TABLE IF EXISTS hypertable;
 CREATE TABLE hypertable ( TestColumnFamily );
 LOAD DATA INFILE ROW_KEY_COLUMN=rowkey "hypertable_ts.tsv" INTO TABLE hypertable;
 SELECT * from hypertable WHERE TIMESTAMP > '2009-02-12 02:12:12.100000000' DISPLAY_TIMESTAMPS;
-2009-02-12 02:12:13.000000001	192.168.14.2	TestColumnFamily	testvalue_2
+2009-02-12 02:12:13.000000000	192.168.14.2	TestColumnFamily	testvalue_2
 2009-02-12 02:12:14.000000000	192.168.14.3	TestColumnFamily	testvalue_3
 SELECT * from hypertable WHERE TIMESTAMP < '2009-02-12 02:12:13:4' DISPLAY_TIMESTAMPS;
 2009-02-12 02:12:12.100000000	192.168.14.1	TestColumnFamily	testvalue_1
-2009-02-12 02:12:13.000000001	192.168.14.2	TestColumnFamily	testvalue_2
+2009-02-12 02:12:13.000000000	192.168.14.2	TestColumnFamily	testvalue_2
 SELECT * from hypertable WHERE TIMESTAMP <= '2009-02-12 02:12:15' DISPLAY_TIMESTAMPS;
 2009-02-12 02:12:12.100000000	192.168.14.1	TestColumnFamily	testvalue_1
-2009-02-12 02:12:13.000000001	192.168.14.2	TestColumnFamily	testvalue_2
+2009-02-12 02:12:13.000000000	192.168.14.2	TestColumnFamily	testvalue_2
 2009-02-12 02:12:14.000000000	192.168.14.3	TestColumnFamily	testvalue_3
 DROP TABLE IF EXISTS test;
 CREATE TABLE test ( e, d );
@@ -265,6 +275,37 @@ a	b	n
 az	b	n
 b	b	n
 bz	b	n
+SELECT * FROM test WHERE (ROW =^'a' or 'd' < ROW < 'b' or ROW =^ 'b');
+Error: start_row (d) > end_row (b) - HYPERTABLE bad scan specification
+INSERT INTO test values ('2010-01-01 00:00:01', 'r1', 'b:q1', 'v1'), ('2010-01-01 00:00:02', 'r1', 'b:q1', 'v2'), ('2010-01-01 00:00:03', 'r1', 'b:q1', 'v3'), ('2010-01-01 00:00:00', 'r1', 'b:q', 'v4'),('2010-01-01 00:00:05', 'r1', 'b:q1', 'v5') ;
+SELECT * from test WHERE ROW="r1" DISPLAY_TIMESTAMPS;
+2010-01-01 00:00:00.000000000	r1	b:q	v4
+2010-01-01 00:00:05.000000000	r1	b:q1	v5
+2010-01-01 00:00:03.000000000	r1	b:q1	v3
+2010-01-01 00:00:02.000000000	r1	b:q1	v2
+2010-01-01 00:00:01.000000000	r1	b:q1	v1
+DELETE "b:q1" FROM test WHERE ROW="r1" VERSION "2010-01-01 00:00:02";
+SELECT * FROM test WHERE ROW="r1" DISPLAY_TIMESTAMPS;
+2010-01-01 00:00:00.000000000	r1	b:q	v4
+2010-01-01 00:00:05.000000000	r1	b:q1	v5
+2010-01-01 00:00:03.000000000	r1	b:q1	v3
+2010-01-01 00:00:01.000000000	r1	b:q1	v1
+DELETE "b:q1" FROM test WHERE ROW="r1" TIMESTAMP "2010-01-01 00:00:02";
+SELECT * FROM test WHERE ROW="r1" DISPLAY_TIMESTAMPS;
+2010-01-01 00:00:00.000000000	r1	b:q	v4
+2010-01-01 00:00:05.000000000	r1	b:q1	v5
+2010-01-01 00:00:03.000000000	r1	b:q1	v3
+DELETE * FROM test WHERE ROW="r1" TIMESTAMP "2010-01-01 00:00:02";
+SELECT * FROM test WHERE ROW="r1" DISPLAY_TIMESTAMPS;
+2010-01-01 00:00:05.000000000	r1	b:q1	v5
+2010-01-01 00:00:03.000000000	r1	b:q1	v3
+DELETE "b:q1" FROM test WHERE ROW="r1" VERSION "2010-01-01 00:00:03";
+SELECT * FROM test WHERE ROW="r1" RETURN_DELETES DISPLAY_TIMESTAMPS;
+2010-01-01 00:00:02.000000000	r1		DELETE ROW
+2010-01-01 00:00:02.000000000	r1	b:q1		DELETE CELL
+2010-01-01 00:00:03.000000000	r1	b:q1		DELETE CELL VERSION
+2010-01-01 00:00:02.000000000	r1	b:q1		DELETE CELL VERSION
+2010-01-01 00:00:05.000000000	r1	b:q1	v5
 DROP TABLE IF EXISTS test;
 CREATE TABLE test ( tag );
 INSERT INTO test VALUES("how", "tag:A", "n");
@@ -475,7 +516,7 @@ foo	tag:weight	150lb
 #
 # Issue 154
 #
-CREATE TABLE bug ( F MAX_VERSIONS=1 );
+CREATE TABLE bug ( F MAX_VERSIONS 1 );
 SELECT * FROM bug;
 INSERT INTO bug VALUES ('R','F:Q','V1');
 SELECT * FROM bug;
@@ -506,7 +547,7 @@ INSERT INTO bug VALUES ('R','F:Q','V6');
 SELECT * FROM bug;
 R	F:Q	V6
 DROP TABLE bug;
-CREATE TABLE bug ( F MAX_VERSIONS=2 );
+CREATE TABLE bug ( F MAX_VERSIONS 2 );
 SELECT * FROM bug;
 INSERT INTO bug VALUES ('R','F:Q','V1');
 SELECT * FROM bug;
@@ -649,6 +690,8 @@ Error: Column family 'Red' multiply defined - HYPERTABLE bad schema
 ALTER TABLE Fruits RENAME COLUMN FAMILY ('Orange', 'Pink') RENAME COLUMN FAMILY ('refer-url', 'referral');
 insert into Fruits values('www.cnn.com', 'Orange', 'Kumquat');
 ERROR hypertable : caught std::exception: Bad column family 'Orange'
+ERROR hypertable : set_cells: Hypertable::Exception: Bad column family 'Orange' - HYPERTABLE bad key
+	at void Hypertable::TableMutatorAsync::to_full_key(const void*, const char*, const void*, int64_t, int64_t, uint8_t, Hypertable::Key&, bool&) (src/cc/Hypertable/Lib/TableMutatorAsync.cc)
 Error: Bad column family 'Orange' - HYPERTABLE bad key
 insert into Fruits values('www.cnn.com', 'Pink', 'Grapefruit');
 select * from Fruits;
@@ -2222,7 +2265,7 @@ ACCESS GROUP bar_group ( bar )
 
 show create table render_bug;
 
-CREATE TABLE render_bug (
+CREATE TABLE 'render_bug' (
   foo,
   bar,
   ACCESS GROUP 'foo_group' (foo),
@@ -2246,10 +2289,10 @@ SELECT * FROM Fruits INTO FILE 'hypertable_select_gz_test.output.gz';
 DROP table if exists Fruits;
 CREATE TABLE Fruits (
 apple TTL=2 DAYS,
-banana MAX_VERSIONS=2,
+banana MAX_VERSIONS 2,
 carrot,
 ACCESS GROUP foo BLOCKSIZE=20000 ( banana )
-) IN_MEMORY BLOCKSIZE=10000 TTL=1 WEEK MAX_VERSIONS=3;
+) IN_MEMORY BLOCKSIZE=10000 TTL=1 WEEK MAX_VERSIONS 3;
 SHOW CREATE TABLE Fruits;
 
 CREATE TABLE Fruits (
@@ -2458,7 +2501,7 @@ row1	cf1	17
 row1	cf1:cq1	13
 row1	cf2:cq1	Foo1
 row2	cf2	Foo2
-SELECT * from CounterTest WHERE CELL > 'row0','cf1:cq2' LIMIT=2 CELL_LIMIT=1 MAX_VERSIONS=2;
+SELECT * from CounterTest WHERE CELL > 'row0','cf1:cq2' LIMIT=2 CELL_LIMIT_PER_FAMILY=1 MAX_VERSIONS 2;
 row0	cf3:cq1	World
 row0	cf4:cq1	6
 row1	cf1	17
@@ -2515,9 +2558,139 @@ http://yahoo.com	col2:bird	pheasant
 http://yahoo.com	col2:mailto	bodhi2sattva17
 SELECT col1:/^w[^a-zA-Z]*$/ from RegexpTest WHERE ROW REGEXP "m.*\s\S";
 moss berry	col1:w1234	giants
+SELECT col1 from RegexpTest WHERE VALUE REGEXP "^clone$";
+orange marmalade	col1:w1234	clone
 SELECT CELLS col1:/^w[^a-zA-Z]*$/ from RegexpTest WHERE ROW REGEXP "^\D+" AND VALUE REGEXP "l.*e";
 orange marmalade	col1:w1234	clone
 SELECT CELLS col1:/^w/, col2:/^[em].*/ from RegexpTest WHERE VALUE REGEXP "i.*a";
 http://yahoo.com	col2:mailto	bodhi2sattva17
 martingale_123	col2:ergodic1	Consignificative65Era
 moss berry	col1:w1234	giants
+SELECT CELLS col1:/^w/, col2:/^[em].*/ from RegexpTest WHERE VALUE REGEXP "i.*a" KEYS_ONLY;
+http://yahoo.com
+martingale_123
+moss berry
+
+# test empty qualifier filtering
+INSERT INTO RegexpTest VALUES('http://yahoo.com', 'col2', 'swiss');
+SELECT col1, col2 from RegexpTest;
+http://www.dmv.ca.gov	col1:fish	salmon tuna
+http://yahoo.com	col2	swiss
+http://yahoo.com	col2:bird	pheasant
+http://yahoo.com	col2:mailto	bodhi2sattva17
+martingale_123	col2:ergodic1	Consignificative65Era
+moss berry	col1:w1234	giants
+moss berry	col1:word	panini
+orange marmalade	col1:w1234	clone
+suitability	col1	centrist
+SELECT col1:"", col2:"" from RegexpTest;
+http://yahoo.com	col2	swiss
+suitability	col1	centrist
+SELECT CELLS col1:"", col2:"" from RegexpTest;
+http://yahoo.com	col2	swiss
+suitability	col1	centrist
+SELECT col1:"" from RegexpTest WHERE ROW = 'suitability';
+suitability	col1	centrist
+SELECT CELLS col1:"" from RegexpTest WHERE ROW = 'suitability';
+suitability	col1	centrist
+SELECT col2:"" from RegexpTest WHERE ROW = 'http://yahoo.com';
+http://yahoo.com	col2	swiss
+SELECT CELLS col2:"" from RegexpTest WHERE ROW = 'http://yahoo.com';
+http://yahoo.com	col2	swiss
+
+# test scan and filter rows
+SELECT col1, col2 from RegexpTest SCAN_AND_FILTER_ROWS;
+http://www.dmv.ca.gov	col1:fish	salmon tuna
+http://yahoo.com	col2	swiss
+http://yahoo.com	col2:bird	pheasant
+http://yahoo.com	col2:mailto	bodhi2sattva17
+martingale_123	col2:ergodic1	Consignificative65Era
+moss berry	col1:w1234	giants
+moss berry	col1:word	panini
+orange marmalade	col1:w1234	clone
+suitability	col1	centrist
+SELECT col1:"", col2:"" from RegexpTest SCAN_AND_FILTER_ROWS;
+http://yahoo.com	col2	swiss
+suitability	col1	centrist
+SELECT CELLS col1:"", col2:"" from RegexpTest SCAN_AND_FILTER_ROWS;
+http://yahoo.com	col2	swiss
+suitability	col1	centrist
+SELECT col1:"" from RegexpTest WHERE ROW = 'suitability' SCAN_AND_FILTER_ROWS;
+suitability	col1	centrist
+SELECT * from RegexpTest WHERE (ROW = 'suitability' OR ROW = 'moss berry') SCAN_AND_FILTER_ROWS;
+moss berry	col1:w1234	giants
+moss berry	col1:word	panini
+suitability	col1	centrist
+SELECT * from RegexpTest WHERE (ROW = 'suitability' OR ROW = 'moss berry' OR ROW = 'orange marmalade') SCAN_AND_FILTER_ROWS;
+moss berry	col1:w1234	giants
+moss berry	col1:word	panini
+orange marmalade	col1:w1234	clone
+suitability	col1	centrist
+SELECT * from RegexpTest WHERE (ROW = 'suitability' OR ROW = 'moss berry' OR ROW = 'orange marmalade' OR ROW = 'http://yahoo.com') SCAN_AND_FILTER_ROWS;
+http://yahoo.com	col2	swiss
+http://yahoo.com	col2:bird	pheasant
+http://yahoo.com	col2:mailto	bodhi2sattva17
+moss berry	col1:w1234	giants
+moss berry	col1:word	panini
+orange marmalade	col1:w1234	clone
+suitability	col1	centrist
+SELECT * from RegexpTest WHERE (ROW = 'suitability' OR ROW = 'moss berry' OR ROW = 'orange marmalade' OR ROW = 'http://yahoo.com' OR ROW = 'http://www.dmv.ca.gov' OR ROW = 'martingale_123') SCAN_AND_FILTER_ROWS;
+http://www.dmv.ca.gov	col1:fish	salmon tuna
+http://yahoo.com	col2	swiss
+http://yahoo.com	col2:bird	pheasant
+http://yahoo.com	col2:mailto	bodhi2sattva17
+martingale_123	col2:ergodic1	Consignificative65Era
+moss berry	col1:w1234	giants
+moss berry	col1:word	panini
+orange marmalade	col1:w1234	clone
+suitability	col1	centrist
+SELECT * from RegexpTest WHERE ROW REGEXP "http://.*" AND (ROW = 'http://www.dmv.ca.gov' OR ROW = 'moss berry' OR ROW = 'orange marmalade' OR ROW = 'http://yahoo.com') SCAN_AND_FILTER_ROWS;
+http://www.dmv.ca.gov	col1:fish	salmon tuna
+http://yahoo.com	col2	swiss
+http://yahoo.com	col2:bird	pheasant
+http://yahoo.com	col2:mailto	bodhi2sattva17
+SELECT CELLS * from RegexpTest WHERE (ROW = 'suitability' OR ROW = 'moss berry' OR ROW = 'orange marmalade') AND VALUE REGEXP "^c.*" SCAN_AND_FILTER_ROWS;
+orange marmalade	col1:w1234	clone
+suitability	col1	centrist
+SELECT CELLS col1:/^w[^a-zA-Z]*$/ from RegexpTest WHERE (ROW = 'suitability' OR ROW = 'moss berry' OR ROW = 'orange marmalade' OR ROW = 'http://yahoo.com') SCAN_AND_FILTER_ROWS;
+moss berry	col1:w1234	giants
+orange marmalade	col1:w1234	clone
+SELECT * from RegexpTest WHERE (ROW = 'suitability' OR ROW = 'Suitability' OR ROW = 'moss berry' OR ROW = 'moss abc') SCAN_AND_FILTER_ROWS;
+moss berry	col1:w1234	giants
+moss berry	col1:word	panini
+suitability	col1	centrist
+SELECT col1:"", col2:"" from RegexpTest WHERE (ROW = 'suitability' OR ROW = 'http://yahoo.com') SCAN_AND_FILTER_ROWS;
+http://yahoo.com	col2	swiss
+suitability	col1	centrist
+SELECT CELLS col1:"" from RegexpTest WHERE (ROW = 'suitability' OR ROW = 'Suitability' OR ROW = 'suitability') SCAN_AND_FILTER_ROWS;
+suitability	col1	centrist
+SELECT * from RegexpTest WHERE (ROW = 'Suitability' OR ROW = 'moss Berry' OR ROW = 'Orange marmalade' OR ROW = 'http://yahoo.com/mail') SCAN_AND_FILTER_ROWS;
+
+# test max_versions with other predicates
+INSERT INTO RegexpTest VALUES('version_test_0', 'col2', '000');
+INSERT INTO RegexpTest VALUES('version_test_0', 'col2', '100');
+SELECT col2 from RegexpTest WHERE ROW = 'version_test_0' AND VALUE REGEXP "000" MAX_VERSIONS 1;
+SELECT col2 from RegexpTest WHERE ROW = 'version_test_0' AND VALUE REGEXP "000" MAX_VERSIONS 2;
+version_test_0	col2	000
+INSERT INTO RegexpTest VALUES('2007-12-02 08:00:00', 'version_test_1', 'col2:000', '000');
+INSERT INTO RegexpTest VALUES('2007-12-02 09:00:00', 'version_test_1', 'col2:000', '100');
+INSERT INTO RegexpTest VALUES('2007-12-02 08:00:00', 'version_test_1', 'col2:100', '000');
+SELECT col2:/00/ from RegexpTest WHERE ROW = 'version_test_1' AND VALUE REGEXP "000" MAX_VERSIONS 1;
+version_test_1	col2:100	000
+SELECT col2:/00/ from RegexpTest WHERE ROW = 'version_test_1' AND VALUE REGEXP "000"  AND '2007-12-02 07:30:00' < TIMESTAMP <= '2007-12-02 08:30:00' MAX_VERSIONS 1 DISPLAY_TIMESTAMPS;
+2007-12-02 08:00:00.000000000	version_test_1	col2:000	000
+2007-12-02 08:00:00.000000000	version_test_1	col2:100	000
+
+# negative tests with OFFSET and CELL_OFFSET
+SELECT col2 from RegexpTest OFFSET 1 CELL_OFFSET 2;
+Error: SELECT OFFSET predicate not allowed in combination with OFFSET. - HYPERTABLE HQL parse error
+SELECT col2 from RegexpTest OFFSET 2 CELL_OFFSET 1;
+Error: SELECT OFFSET predicate not allowed in combination with OFFSET. - HYPERTABLE HQL parse error
+
+# issue 528: embedded semicolon test
+DROP TABLE IF EXISTS Test;
+CREATE TABLE Test('col');
+INSERT INTO Test VALUES ('foo;', 'col', 'bar');
+SELECT * FROM Test WHERE ROW='foo;';
+foo;	col	bar
+

@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -37,11 +37,11 @@ using namespace std;
 void
 MaintenancePrioritizerLowMemory::prioritize(RangeStatsVector &range_data,
                                             MemoryState &memory_state,
-                                            String &trace_str) {
+                                            int32_t priority, String &trace_str) {
   RangeStatsVector range_data_root;
   RangeStatsVector range_data_metadata;
+  RangeStatsVector range_data_system;
   RangeStatsVector range_data_user;
-  int32_t priority = 1;
   int collector_id = RSStats::STATS_COLLECTOR_MAINTENANCE;
 
   for (size_t i=0; i<range_data.size(); i++) {
@@ -49,6 +49,8 @@ MaintenancePrioritizerLowMemory::prioritize(RangeStatsVector &range_data,
       range_data_root.push_back(range_data[i]);
     else if (range_data[i]->is_metadata)
       range_data_metadata.push_back(range_data[i]);
+    else if (range_data[i]->is_system)
+      range_data_system.push_back(range_data[i]);
     else
       range_data_user.push_back(range_data[i]);
   }
@@ -72,25 +74,36 @@ MaintenancePrioritizerLowMemory::prioritize(RangeStatsVector &range_data,
                           Global::log_prune_threshold_min, memory_state,
                           priority, trace_str);
 
-
   /**
-   * Assign priority for USER ranges
+   *  Compute prune threshold based on load activity
    */
   int64_t prune_threshold = (int64_t)(m_server_stats->get_update_mbps(collector_id) * (double)Global::log_prune_threshold_max);
-
   if (prune_threshold < Global::log_prune_threshold_min)
     prune_threshold = Global::log_prune_threshold_min;
   else if (prune_threshold > Global::log_prune_threshold_max)
     prune_threshold = Global::log_prune_threshold_max;
-
   trace_str += String("STATS user log prune threshold\t") + prune_threshold + "\n";
 
-  if (!range_data_user.empty()) {
-    assign_priorities_all(range_data_user, Global::user_log, prune_threshold,
+  /**
+   * Assign priority for SYSTEM ranges
+   */
+  if (!range_data_system.empty())
+    assign_priorities_all(range_data_system, Global::system_log, prune_threshold,
                           memory_state, priority, trace_str);
-    assign_priorities_user(range_data_user, memory_state, priority, trace_str);
-  }
 
+  /**
+   * Assign priority for USER ranges
+   */
+  if (!range_data_user.empty()) {
+
+    if (schedule_inprogress_operations(range_data_user, memory_state, priority, trace_str))
+      schedule_splits_and_relinquishes(range_data, memory_state, priority, trace_str);
+
+    assign_priorities_user(range_data_user, memory_state, priority, trace_str);
+
+    schedule_necessary_compactions(range_data_user, Global::user_log, prune_threshold,
+                                   memory_state, priority, trace_str);
+  }
 
 }
 
@@ -98,7 +111,7 @@ MaintenancePrioritizerLowMemory::prioritize(RangeStatsVector &range_data,
 /**
  * Memory freeing algorithm:
  *
- * 1. schedule in-progress splits
+ * 1. schedule in-progress relinquish and/or split operations
  * 2. schedule needed splits
  * 3. schedule needed compactions
  */
@@ -107,10 +120,10 @@ MaintenancePrioritizerLowMemory::assign_priorities_all(RangeStatsVector &range_d
             CommitLog *log, int64_t prune_threshold, MemoryState &memory_state,
 	    int32_t &priority, String &trace_str) {
 
-  if (!schedule_inprogress_splits(range_data, memory_state, priority, trace_str))
+  if (!schedule_inprogress_operations(range_data, memory_state, priority, trace_str))
     return;
 
-  if (!schedule_splits(range_data, memory_state, priority, trace_str))
+  if (!schedule_splits_and_relinquishes(range_data, memory_state, priority, trace_str))
     return;
 
   if (!schedule_necessary_compactions(range_data, log, prune_threshold,
@@ -152,47 +165,39 @@ MaintenancePrioritizerLowMemory::assign_priorities_user(RangeStatsVector &range_
 
   if (update_bytes < 500000 && scan_count > 10) {
 
-    // READ heavy
+    HT_INFOF("READ workload prioritization (update_bytes=%llu, scan_count=%u)",
+	     (Llu)update_bytes, (unsigned)scan_count);
 
     if (!compact_cellcaches(range_data, memory_state, priority, trace_str))
       return;
 
-    Global::block_cache->cap_memory_use();
-    memory_state.decrement_needed( Global::block_cache->decrease_limit(memory_state.needed) );
-    if (!memory_state.need_more())
-      return;
+    if (Global::block_cache) {
+      Global::block_cache->cap_memory_use();
+      memory_state.decrement_needed( Global::block_cache->decrease_limit(memory_state.needed) );
+      if (!memory_state.need_more())
+        return;
+    }
 
     if (!purge_cellstore_indexes(range_data, memory_state, priority, trace_str))
-      return;
-
-  }
-  else if (m_server_stats->get_update_mbps(collector_id) > 0.5 && scan_count < 5) {
-
-    // WRITE heavy
-
-    Global::block_cache->cap_memory_use();
-    memory_state.decrement_needed( Global::block_cache->decrease_limit(memory_state.needed) );
-    if (!memory_state.need_more())
-      return;
-
-    if (!purge_cellstore_indexes(range_data, memory_state, priority, trace_str))
-      return;
-
-    if (!compact_cellcaches(range_data, memory_state, priority, trace_str))
       return;
 
   }
   else {
 
-    Global::block_cache->cap_memory_use();
-    memory_state.decrement_needed( Global::block_cache->decrease_limit(memory_state.needed) );
-    if (!memory_state.need_more())
+    HT_INFOF("WRITE workload prioritization (update_bytes=%llu, scan_count=%u)",
+	     (Llu)update_bytes, (unsigned)scan_count);
+
+    if (Global::block_cache) {
+      Global::block_cache->cap_memory_use();
+      memory_state.decrement_needed( Global::block_cache->decrease_limit(memory_state.needed) );
+      if (!memory_state.need_more())
+        return;
+    }
+
+    if (!purge_cellstore_indexes(range_data, memory_state, priority, trace_str))
       return;
 
     if (!compact_cellcaches(range_data, memory_state, priority, trace_str))
-      return;
-
-    if (!purge_cellstore_indexes(range_data, memory_state, priority, trace_str))
       return;
 
   }

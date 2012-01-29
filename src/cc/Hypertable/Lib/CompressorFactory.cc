@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Luke Lu (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -27,6 +27,7 @@
 #include "BlockCompressionCodecZlib.h"
 #include "BlockCompressionCodecLzo.h"
 #include "BlockCompressionCodecQuicklz.h"
+#include "BlockCompressionCodecSnappy.h"
 
 using namespace Hypertable;
 using namespace std;
@@ -59,6 +60,9 @@ CompressorFactory::parse_block_codec_spec(const std::string &spec,
   if (name == "quicklz")
     return BlockCompressionCodec::QUICKLZ;
 
+  if (name == "snappy")
+    return BlockCompressionCodec::SNAPPY;
+
   HT_ERRORF("unknown codec type: %s", name.c_str());
   return BlockCompressionCodec::UNKNOWN;
 }
@@ -77,6 +81,8 @@ CompressorFactory::create_block_codec(BlockCompressionCodec::Type type,
     return new BlockCompressionCodecLzo(args);
   case BlockCompressionCodec::QUICKLZ:
     return new BlockCompressionCodecQuicklz(args);
+  case BlockCompressionCodec::SNAPPY:
+    return new BlockCompressionCodecSnappy(args);
   default:
     HT_THROWF(Error::BLOCK_COMPRESSOR_UNSUPPORTED_TYPE, "Invalid compression "
               "type: '%d'", (int)type);

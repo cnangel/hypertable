@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -110,14 +110,6 @@ int main(int argc, char **argv) {
   }
 
   cout << "FileBlockCache_test SEED = " << seed << ", total-memory = " << total_memory << endl;
-
-  /**
-   * Check to make sure cache rejects items that are too large
-   */
-  if (cache->insert_and_checkout(0, 0, 0, total_memory+1)) {
-    HT_ERROR("Cache accepted too large of an item");
-    return 1;
-  }
 
   while (total_alloc < total_memory) {
     index = (int)(random() % (MAX_FILE_ID*MAX_FILE_OFFSET));

@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -77,11 +77,13 @@ namespace Hypertable {
      * @param log_dir directory of the commit log
      * @param props reference to properties map
      * @param init_log base log to pull fragments from
+     * @param is_meta true for root, system and metadata logs
      */
-    CommitLog(Filesystem *fs, const String &log_dir,
-              PropertiesPtr &props, CommitLogBase *init_log = 0)
-      : CommitLogBase(log_dir) {
-      initialize(fs, log_dir, props, init_log);
+    CommitLog(FilesystemPtr &fs, const String &log_dir,
+              PropertiesPtr &props, CommitLogBase *init_log = 0,
+              bool is_meta=true)
+      : CommitLogBase(log_dir), m_fs(fs) {
+      initialize(log_dir, props, init_log, is_meta);
     }
 
     /**
@@ -89,8 +91,9 @@ namespace Hypertable {
      *
      * @param fs filesystem to write log into
      * @param log_dir directory of the commit log
+     * @param is_meta true for root, system and metadata logs
      */
-    CommitLog(Filesystem *fs, const String &log_dir);
+    CommitLog(FilesystemPtr &fs, const String &log_dir, bool is_meta=true);
 
     virtual ~CommitLog();
 
@@ -181,14 +184,14 @@ namespace Hypertable {
     static const char MAGIC_LINK[10];
 
   private:
-    void initialize(Filesystem *, const String &log_dir,
-                    PropertiesPtr &, CommitLogBase *init_log);
+    void initialize(const String &log_dir,
+                    PropertiesPtr &, CommitLogBase *init_log, bool is_meta);
     int roll();
     int compress_and_write(DynamicBuffer &input, BlockCompressionHeader *header,
                            int64_t revision, bool sync);
 
     Mutex                   m_mutex;
-    Filesystem             *m_fs;
+    FilesystemPtr           m_fs;
     BlockCompressionCodec  *m_compressor;
     String                  m_cur_fragment_fname;
     int64_t                 m_cur_fragment_length;

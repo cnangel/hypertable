@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -31,10 +31,12 @@ namespace Hypertable {
   class RangeMaintenanceGuard {
   public:
 
-    RangeMaintenanceGuard() : m_in_progress(false) {}
+    RangeMaintenanceGuard() : m_in_progress(false), m_disabled(false) {}
 
     void activate() {
       ScopedLock lock(m_mutex);
+      if (m_disabled)
+        HT_THROW(Error::RANGESERVER_RANGE_NOT_ACTIVE, "");
       if (m_in_progress)
         HT_THROW(Error::RANGESERVER_RANGE_BUSY, "");
       m_in_progress = true;
@@ -57,6 +59,11 @@ namespace Hypertable {
       return m_in_progress;
     }
 
+    void disable() {
+      ScopedLock lock(m_mutex);
+      m_disabled = true;
+    }
+
     class Activator {
     public:
       Activator(RangeMaintenanceGuard &guard) : m_guard(&guard) {
@@ -73,6 +80,7 @@ namespace Hypertable {
     Mutex m_mutex;
     boost::condition m_cond;
     bool m_in_progress;
+    bool m_disabled;
   };
 
 }

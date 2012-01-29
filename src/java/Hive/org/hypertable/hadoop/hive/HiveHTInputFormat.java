@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2010 Sanjit Jhala (Hypertable, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -135,7 +135,7 @@ public class HiveHTInputFormat<K extends BytesWritable, V extends Row>
     if (keys_only)
       scanspec.setKeys_only(true);
 
-    scanspec.setRevs(1);
+    scanspec.setVersions(1);
 
     ScanSpec spec = htSplit.getSplit().createScanSpec(scanspec);
 
@@ -214,7 +214,7 @@ public class HiveHTInputFormat<K extends BytesWritable, V extends Row>
     // ask HT to return keys only
     if (keys_only)
       scanspec.setKeys_only(true);
-    scanspec.setRevs(1);
+    scanspec.setVersions(1);
 
     htRowInputFormat.set_scan_spec(scanspec);
 

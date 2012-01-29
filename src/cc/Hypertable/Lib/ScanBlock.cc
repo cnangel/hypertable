@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -35,7 +35,8 @@ using namespace Serialization;
 /**
  *
  */
-ScanBlock::ScanBlock() : m_flags(0x0001), m_scanner_id(-1) {
+ScanBlock::ScanBlock() : m_flags(0x0001), m_scanner_id(-1),
+    m_skipped_rows(0), m_skipped_cells(0) {
   m_iter = m_vec.end();
 }
 
@@ -58,6 +59,8 @@ int ScanBlock::load(EventPtr &event_ptr) {
   try {
     m_flags = decode_i16(&decode_ptr, &decode_remain);
     m_scanner_id = decode_i32(&decode_ptr, &decode_remain);
+    m_skipped_rows = decode_i32(&decode_ptr, &decode_remain);
+    m_skipped_cells = decode_i32(&decode_ptr, &decode_remain);
     len = decode_i32(&decode_ptr, &decode_remain);
   }
   catch (Exception &e) {

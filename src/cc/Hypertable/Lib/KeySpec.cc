@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -30,6 +30,19 @@ namespace Hypertable {
     HT_DUMP_CSTR(os, key, cell.row);
     HT_DUMP_CSTR(os, cf, cell.column_family);
     HT_DUMP_CSTR(os, cq, cell.column_qualifier);
+
+    if (cell.flag == FLAG_DELETE_ROW)
+      os << " flag=DELETE_ROW";
+    else if (cell.flag == FLAG_DELETE_COLUMN_FAMILY)
+      os << " flag=DELETE_COLUMN_FAMILY";
+    else if (cell.flag == FLAG_DELETE_CELL)
+      os << " flag=DELETE_CELL";
+    else if (cell.flag == FLAG_DELETE_CELL_VERSION)
+      os << " flag=DELETE_CELL_VERSION";
+    else if (cell.flag == FLAG_INSERT)
+      os << " flag=INSERT";
+    else
+      os << " flag=" << cell.flag << " (unrecognized)";
 
     if (cell.timestamp == TIMESTAMP_AUTO)
       os <<" ts=AUTO";

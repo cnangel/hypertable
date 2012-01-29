@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2007 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -20,6 +20,7 @@
  */
 
 #include "Common/Compat.h"
+#include "Common/Serialization.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -103,6 +104,28 @@ bool InetAddr::initialize(sockaddr_in *addr, const char *host, uint16_t port) {
 }
 
 bool
+InetAddr::is_ipv4(const char *ipin) {
+  const char *ptr = ipin, *end = ipin + strlen(ipin);
+  char *last;
+  int component=0;
+  int num_components=0;
+  int base=10;
+
+  while(ptr < end) {
+    component = strtol(ptr, &last, base);
+    num_components++;
+    if (last == end)
+      break;
+    if (*last != '.' || last > end || component > 255 || component < 0 || num_components > 4)
+      return false;
+    ptr = last+1;
+  }
+  if (num_components != 4 || component > 255 || component < 0)
+    return false;
+  return true;
+}
+
+bool
 InetAddr::parse_ipv4(const char *ipin, uint16_t port, sockaddr_in &addr,
                      int base) {
   uint8_t *ip = (uint8_t *)&addr.sin_addr.s_addr;
@@ -175,6 +198,25 @@ bool InetAddr::initialize(sockaddr_in *addr, uint32_t haddr, uint16_t port) {
   addr->sin_port = htons(port);
   return true;
 }
+
+size_t InetAddr::encoded_length() const {
+  return 8;
+}
+
+void InetAddr::encode(uint8_t **bufp) const {
+  *(*bufp)++ = sizeof(sockaddr_in);
+  *(*bufp)++ = sin_family;
+  Serialization::encode_i16(bufp, sin_port);
+  Serialization::encode_i32(bufp, sin_addr.s_addr);
+}
+
+void InetAddr::decode(const uint8_t **bufp, size_t *remainp) {
+  Serialization::decode_i8(bufp, remainp);
+  sin_family = Serialization::decode_i8(bufp, remainp);
+  sin_port = Serialization::decode_i16(bufp, remainp);
+  sin_addr.s_addr = Serialization::decode_i32(bufp, remainp);
+}
+
 
 String InetAddr::format(const sockaddr_in &addr, int sep) {
   // inet_ntoa is not thread safe on many platforms and deprecated

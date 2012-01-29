@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -48,7 +48,7 @@ using namespace std;
 
 
 bool
-IOHandlerAccept::handle_event(struct pollfd *event, clock_t arrival_clocks, time_t arival_time) {
+IOHandlerAccept::handle_event(struct pollfd *event, time_t arival_time) {
   if (event->revents & POLLIN)
     return handle_incoming_connection();
   return true;
@@ -58,19 +58,19 @@ IOHandlerAccept::handle_event(struct pollfd *event, clock_t arrival_clocks, time
  *
  */
 #if defined(__APPLE__) || defined(__FreeBSD__)
-bool IOHandlerAccept::handle_event(struct kevent *event, clock_t, time_t) {
+bool IOHandlerAccept::handle_event(struct kevent *event, time_t) {
   //DisplayEvent(event);
   if (event->filter == EVFILT_READ)
     return handle_incoming_connection();
   return true;
 }
 #elif defined(__linux__)
-bool IOHandlerAccept::handle_event(struct epoll_event *event, clock_t, time_t) {
+bool IOHandlerAccept::handle_event(struct epoll_event *event, time_t) {
   //DisplayEvent(event);
   return handle_incoming_connection();
 }
 #elif defined(__sun__)
-bool IOHandlerAccept::handle_event(port_event_t *event, clock_t, time_t) {
+bool IOHandlerAccept::handle_event(port_event_t *event, time_t) {
   if (event->portev_events == POLLIN)
     return handle_incoming_connection();
   return true;

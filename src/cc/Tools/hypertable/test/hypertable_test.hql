@@ -61,11 +61,14 @@ INSERT INTO hypertable VALUES ('2008-06-28 01:00:01', 'k2', 'a', 'a21'),('2008-0
 INSERT INTO hypertable VALUES ('2008-06-28 01:00:02', 'k2', 'b', 'b22');
 INSERT INTO hypertable VALUES ('2008-06-28 01:00:03', 'k1', 'a', 'a22');
 SELECT * FROM hypertable WHERE ROW = 'k1' AND TIMESTAMP < '2008-06-28 01:00:01' DISPLAY_TIMESTAMPS;
-SELECT * FROM hypertable CELL_LIMIT=1 LIMIT=1;
-SELECT * FROM hypertable CELL_LIMIT=1 REVS=2;
-SELECT * FROM hypertable CELL_LIMIT=2 REVS=2;
-SELECT * FROM hypertable CELL_LIMIT=1;
+SELECT a FROM hypertable WHERE ROW="k1" AND TIMESTAMP < '2008-06-28 01:00:01' DISPLAY_TIMESTAMPS CELL_LIMIT_PER_FAMILY 1;
+SELECT * FROM hypertable CELL_LIMIT_PER_FAMILY=1 LIMIT=1;
+SELECT * FROM hypertable CELL_LIMIT_PER_FAMILY=1 REVS=2;
+SELECT * FROM hypertable CELL_LIMIT_PER_FAMILY=2 REVS=2;
+SELECT * FROM hypertable CELL_LIMIT_PER_FAMILY=1;
 SELECT * FROM hypertable LIMIT=1 REVS=2;
+SELECT * FROM hypertable CELL_LIMIT 2;
+SELECT * FROM hypertable CELL_LIMIT 2 CELL_LIMIT_PER_FAMILY 1;
 DROP TABLE IF EXISTS hypertable;
 CREATE TABLE hypertable ( TestColumnFamily );
 LOAD DATA INFILE ROW_KEY_COLUMN=rowkey "hypertable_test.tsv" INTO TABLE hypertable;
@@ -119,6 +122,17 @@ SELECT * FROM test WHERE (ROW = 'a' or ROW = 'c' or ROW = 'g');
 SELECT * FROM test WHERE ('a' < ROW <= 'c' or ROW = 'g' or ROW = 'c');
 SELECT * FROM test WHERE (ROW < 'c' or ROW > 'd');
 SELECT * FROM test WHERE (ROW < 'b' or ROW =^ 'b');
+SELECT * FROM test WHERE (ROW =^'a' or 'd' < ROW < 'b' or ROW =^ 'b');
+INSERT INTO test values ('2010-01-01 00:00:01', 'r1', 'b:q1', 'v1'), ('2010-01-01 00:00:02', 'r1', 'b:q1', 'v2'), ('2010-01-01 00:00:03', 'r1', 'b:q1', 'v3'), ('2010-01-01 00:00:00', 'r1', 'b:q', 'v4'),('2010-01-01 00:00:05', 'r1', 'b:q1', 'v5') ;
+SELECT * from test WHERE ROW="r1" DISPLAY_TIMESTAMPS;
+DELETE "b:q1" FROM test WHERE ROW="r1" VERSION "2010-01-01 00:00:02";
+SELECT * FROM test WHERE ROW="r1" DISPLAY_TIMESTAMPS;
+DELETE "b:q1" FROM test WHERE ROW="r1" TIMESTAMP "2010-01-01 00:00:02";
+SELECT * FROM test WHERE ROW="r1" DISPLAY_TIMESTAMPS;
+DELETE * FROM test WHERE ROW="r1" TIMESTAMP "2010-01-01 00:00:02";
+SELECT * FROM test WHERE ROW="r1" DISPLAY_TIMESTAMPS;
+DELETE "b:q1" FROM test WHERE ROW="r1" VERSION "2010-01-01 00:00:03";
+SELECT * FROM test WHERE ROW="r1" RETURN_DELETES DISPLAY_TIMESTAMPS;
 DROP TABLE IF EXISTS test;
 CREATE TABLE test ( tag );
 INSERT INTO test VALUES("how", "tag:A", "n");
@@ -214,7 +228,7 @@ SELECT * from test WHERE "foo","tag" <= CELL < "foo","phone";
 #
 # Issue 154
 #
-CREATE TABLE bug ( F MAX_VERSIONS=1 );
+CREATE TABLE bug ( F MAX_VERSIONS 1 );
 SELECT * FROM bug;
 INSERT INTO bug VALUES ('R','F:Q','V1');
 SELECT * FROM bug;
@@ -239,7 +253,7 @@ SELECT * FROM bug;
 INSERT INTO bug VALUES ('R','F:Q','V6');
 SELECT * FROM bug;
 DROP TABLE bug;
-CREATE TABLE bug ( F MAX_VERSIONS=2 );
+CREATE TABLE bug ( F MAX_VERSIONS 2 );
 SELECT * FROM bug;
 INSERT INTO bug VALUES ('R','F:Q','V1');
 SELECT * FROM bug;
@@ -371,10 +385,10 @@ SELECT * FROM Fruits INTO FILE 'hypertable_select_gz_test.output.gz';
 DROP table if exists Fruits;
 CREATE TABLE Fruits (
   apple TTL=2 DAYS,
-  banana MAX_VERSIONS=2,
+  banana MAX_VERSIONS 2,
   carrot,
   ACCESS GROUP foo BLOCKSIZE=20000 ( banana )
-) IN_MEMORY BLOCKSIZE=10000 TTL=1 WEEK MAX_VERSIONS=3;
+) IN_MEMORY BLOCKSIZE=10000 TTL=1 WEEK MAX_VERSIONS 3;
 SHOW CREATE TABLE Fruits;
 
 DROP TABLE IF EXISTS test;
@@ -451,7 +465,7 @@ INSERT INTO CounterTest VALUES ('row2', 'cf2', 'Foo2');
 INSERT INTO CounterTest VALUES ('row1', 'cf1:cq1', '6');
 INSERT INTO CounterTest VALUES ('row1', 'cf1:cq1', '7');
 SELECT * from CounterTest WHERE ROW >= 'row1';
-SELECT * from CounterTest WHERE CELL > 'row0','cf1:cq2' LIMIT=2 CELL_LIMIT=1 MAX_VERSIONS=2;
+SELECT * from CounterTest WHERE CELL > 'row0','cf1:cq2' LIMIT=2 CELL_LIMIT_PER_FAMILY=1 MAX_VERSIONS 2;
 INSERT INTO CounterTest VALUES ('row1', 'cf1:cq1', '=3');
 INSERT INTO CounterTest VALUES ('row1', 'cf1:cq1', '+2');
 INSERT INTO CounterTest VALUES ('row1', 'cf1:cq1', '7');
@@ -483,5 +497,56 @@ SELECT col2:bird from RegexpTest WHERE ROW REGEXP "http://.*";
 SELECT col2:"bird" from RegexpTest WHERE ROW REGEXP "http://.*"; 
 SELECT col2:"bird",col2:/mail/ from RegexpTest WHERE ROW REGEXP "http://.*"; 
 SELECT col1:/^w[^a-zA-Z]*$/ from RegexpTest WHERE ROW REGEXP "m.*\s\S";
+SELECT col1 from RegexpTest WHERE VALUE REGEXP "^clone$";
 SELECT CELLS col1:/^w[^a-zA-Z]*$/ from RegexpTest WHERE ROW REGEXP "^\D+" AND VALUE REGEXP "l.*e";
 SELECT CELLS col1:/^w/, col2:/^[em].*/ from RegexpTest WHERE VALUE REGEXP "i.*a";
+SELECT CELLS col1:/^w/, col2:/^[em].*/ from RegexpTest WHERE VALUE REGEXP "i.*a" KEYS_ONLY;
+
+# test empty qualifier filtering
+INSERT INTO RegexpTest VALUES('http://yahoo.com', 'col2', 'swiss');
+SELECT col1, col2 from RegexpTest;
+SELECT col1:"", col2:"" from RegexpTest;
+SELECT CELLS col1:"", col2:"" from RegexpTest;
+SELECT col1:"" from RegexpTest WHERE ROW = 'suitability';
+SELECT CELLS col1:"" from RegexpTest WHERE ROW = 'suitability';
+SELECT col2:"" from RegexpTest WHERE ROW = 'http://yahoo.com';
+SELECT CELLS col2:"" from RegexpTest WHERE ROW = 'http://yahoo.com';
+
+# test scan and filter rows
+SELECT col1, col2 from RegexpTest SCAN_AND_FILTER_ROWS;
+SELECT col1:"", col2:"" from RegexpTest SCAN_AND_FILTER_ROWS;
+SELECT CELLS col1:"", col2:"" from RegexpTest SCAN_AND_FILTER_ROWS;
+SELECT col1:"" from RegexpTest WHERE ROW = 'suitability' SCAN_AND_FILTER_ROWS;
+SELECT * from RegexpTest WHERE (ROW = 'suitability' OR ROW = 'moss berry') SCAN_AND_FILTER_ROWS;
+SELECT * from RegexpTest WHERE (ROW = 'suitability' OR ROW = 'moss berry' OR ROW = 'orange marmalade') SCAN_AND_FILTER_ROWS;
+SELECT * from RegexpTest WHERE (ROW = 'suitability' OR ROW = 'moss berry' OR ROW = 'orange marmalade' OR ROW = 'http://yahoo.com') SCAN_AND_FILTER_ROWS;
+SELECT * from RegexpTest WHERE (ROW = 'suitability' OR ROW = 'moss berry' OR ROW = 'orange marmalade' OR ROW = 'http://yahoo.com' OR ROW = 'http://www.dmv.ca.gov' OR ROW = 'martingale_123') SCAN_AND_FILTER_ROWS;
+SELECT * from RegexpTest WHERE ROW REGEXP "http://.*" AND (ROW = 'http://www.dmv.ca.gov' OR ROW = 'moss berry' OR ROW = 'orange marmalade' OR ROW = 'http://yahoo.com') SCAN_AND_FILTER_ROWS;
+SELECT CELLS * from RegexpTest WHERE (ROW = 'suitability' OR ROW = 'moss berry' OR ROW = 'orange marmalade') AND VALUE REGEXP "^c.*" SCAN_AND_FILTER_ROWS;
+SELECT CELLS col1:/^w[^a-zA-Z]*$/ from RegexpTest WHERE (ROW = 'suitability' OR ROW = 'moss berry' OR ROW = 'orange marmalade' OR ROW = 'http://yahoo.com') SCAN_AND_FILTER_ROWS;
+SELECT * from RegexpTest WHERE (ROW = 'suitability' OR ROW = 'Suitability' OR ROW = 'moss berry' OR ROW = 'moss abc') SCAN_AND_FILTER_ROWS;
+SELECT col1:"", col2:"" from RegexpTest WHERE (ROW = 'suitability' OR ROW = 'http://yahoo.com') SCAN_AND_FILTER_ROWS;
+SELECT CELLS col1:"" from RegexpTest WHERE (ROW = 'suitability' OR ROW = 'Suitability' OR ROW = 'suitability') SCAN_AND_FILTER_ROWS;
+SELECT * from RegexpTest WHERE (ROW = 'Suitability' OR ROW = 'moss Berry' OR ROW = 'Orange marmalade' OR ROW = 'http://yahoo.com/mail') SCAN_AND_FILTER_ROWS;
+
+# test max_versions with other predicates
+INSERT INTO RegexpTest VALUES('version_test_0', 'col2', '000');
+INSERT INTO RegexpTest VALUES('version_test_0', 'col2', '100');
+SELECT col2 from RegexpTest WHERE ROW = 'version_test_0' AND VALUE REGEXP "000" MAX_VERSIONS 1;
+SELECT col2 from RegexpTest WHERE ROW = 'version_test_0' AND VALUE REGEXP "000" MAX_VERSIONS 2;
+INSERT INTO RegexpTest VALUES('2007-12-02 08:00:00', 'version_test_1', 'col2:000', '000');
+INSERT INTO RegexpTest VALUES('2007-12-02 09:00:00', 'version_test_1', 'col2:000', '100');
+INSERT INTO RegexpTest VALUES('2007-12-02 08:00:00', 'version_test_1', 'col2:100', '000');
+SELECT col2:/00/ from RegexpTest WHERE ROW = 'version_test_1' AND VALUE REGEXP "000" MAX_VERSIONS 1;
+SELECT col2:/00/ from RegexpTest WHERE ROW = 'version_test_1' AND VALUE REGEXP "000"  AND '2007-12-02 07:30:00' < TIMESTAMP <= '2007-12-02 08:30:00' MAX_VERSIONS 1 DISPLAY_TIMESTAMPS;
+
+# negative tests with OFFSET and CELL_OFFSET
+SELECT col2 from RegexpTest OFFSET 1 CELL_OFFSET 2;
+SELECT col2 from RegexpTest OFFSET 2 CELL_OFFSET 1;
+
+# issue 528: embedded semicolon test
+DROP TABLE IF EXISTS Test;
+CREATE TABLE Test('col');
+INSERT INTO Test VALUES ('foo;', 'col', 'bar');
+SELECT * FROM Test WHERE ROW='foo;';
+

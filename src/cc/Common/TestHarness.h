@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -63,7 +63,7 @@ namespace Hypertable {
 
     void validate_and_exit(const char *golden_file) {
       validate(golden_file);
-      exit (m_error ? 1 : 0);
+      _exit(m_error ? 1 : 0);
     }
 
     int validate(const char *golden_file) {

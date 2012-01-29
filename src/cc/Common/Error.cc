@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -23,6 +23,13 @@
 #include "Common/HashMap.h"
 
 #include "Error.h"
+
+#include <iomanip>
+
+namespace Hypertable { namespace Logger {
+    extern bool show_line_numbers;
+  }
+}
 
 using namespace Hypertable;
 
@@ -61,6 +68,8 @@ namespace {
         "HYPERTABLE block compressor bad magic string" },
     { Error::BLOCK_COMPRESSOR_CHECKSUM_MISMATCH,
         "HYPERTABLE block compressor block checksum mismatch" },
+    { Error::BLOCK_COMPRESSOR_DEFLATE_ERROR,
+        "HYPERTABLE block compressor deflate error" },
     { Error::BLOCK_COMPRESSOR_INFLATE_ERROR,
         "HYPERTABLE block compressor inflate error" },
     { Error::BLOCK_COMPRESSOR_INIT_ERROR,
@@ -87,7 +96,12 @@ namespace {
     { Error::NAMESPACE_DOES_NOT_EXIST,      "HYPERTABLE namespace does not exist" },
     { Error::BAD_NAMESPACE,                 "HYPERTABLE bad namespace" },
     { Error::NAMESPACE_EXISTS,              "HYPERTABLE namespace exists" },
-
+    { Error::NO_RESPONSE,                   "HYPERTABLE no response" },
+    { Error::NOT_ALLOWED,                   "HYPERTABLE not allowed" },
+    { Error::INDUCED_FAILURE,               "HYPERTABLE induced failure" },
+    { Error::SERVER_SHUTTING_DOWN,          "HYPERTABLE server shutting down" },
+    { Error::LOCATION_UNASSIGNED,           "HYPERTABLE location unassigned" },
+    { Error::ALREADY_EXISTS,                "HYPERTABLE cell already exists" },
     { Error::CONFIG_BAD_ARGUMENT,         "CONFIG bad argument(s)"},
     { Error::CONFIG_BAD_CFG_FILE,         "CONFIG bad cfg file"},
     { Error::CONFIG_GET_ERROR,            "CONFIG failed to get config value"},
@@ -185,13 +199,15 @@ namespace {
     { Error::MASTER_NOT_RUNNING,          "MASTER not running" },
     { Error::MASTER_NO_RANGESERVERS,      "MASTER no range servers" },
     { Error::MASTER_FILE_NOT_LOCKED,      "MASTER file not locked" },
-    { Error::MASTER_RANGESERVER_ALREADY_REGISTERED ,
+    { Error::MASTER_RANGESERVER_ALREADY_REGISTERED,
         "MASTER range server with same location already registered" },
     { Error::MASTER_BAD_COLUMN_FAMILY,    "MASTER bad column family" },
     { Error::MASTER_SCHEMA_GENERATION_MISMATCH,
         "Master schema generation mismatch" },
     { Error::MASTER_LOCATION_ALREADY_ASSIGNED,
       "MASTER location already assigned" },
+    { Error::MASTER_LOCATION_INVALID, "MASTER location invalid" },
+    { Error::MASTER_OPERATION_IN_PROGRESS, "MASTER operation in progress" },
 
     { Error::RANGESERVER_GENERATION_MISMATCH,
         "RANGE SERVER generation mismatch" },
@@ -235,9 +251,11 @@ namespace {
     { Error::RANGESERVER_RANGE_BUSY, "RANGE SERVER range busy" },
     { Error::RANGESERVER_BAD_CELL_INTERVAL, "RANGE SERVER bad cell interval" },
     { Error::RANGESERVER_SHORT_CELLSTORE_READ, "RANGE SERVER short cellstore read" },
+    { Error::RANGESERVER_RANGE_NOT_ACTIVE, "RANGE SERVER range no longer active" },
     { Error::HQL_BAD_LOAD_FILE_FORMAT,         "HQL bad load file format" },
+    { Error::METALOG_VERSION_MISMATCH, "METALOG version mismatch" },
     { Error::METALOG_BAD_RS_HEADER, "METALOG bad range server metalog header" },
-    { Error::METALOG_BAD_M_HEADER,  "METALOG bad master metalog header" },
+    { Error::METALOG_BAD_HEADER,  "METALOG bad metalog header" },
     { Error::METALOG_ENTRY_TRUNCATED,   "METALOG entry truncated" },
     { Error::METALOG_CHECKSUM_MISMATCH, "METALOG checksum mismatch" },
     { Error::METALOG_ENTRY_BAD_TYPE, "METALOG bad entry type" },
@@ -248,7 +266,8 @@ namespace {
     { Error::SERIALIZATION_BAD_VSTR,      "SERIALIZATION bad vstr encoding" },
     { Error::THRIFTBROKER_BAD_SCANNER_ID, "THRIFT BROKER bad scanner id" },
     { Error::THRIFTBROKER_BAD_MUTATOR_ID, "THRIFT BROKER bad mutator id" },
-    { Error::THRIFTBROKER_BAD_NAMESPACE_ID , "THRIFT BROKER bad namespace id" },
+    { Error::THRIFTBROKER_BAD_NAMESPACE_ID, "THRIFT BROKER bad namespace id" },
+    { Error::THRIFTBROKER_BAD_FUTURE_ID,    "THRIFT BROKER bad future id" },
     { 0, 0 }
   };
 
@@ -272,21 +291,55 @@ const char *Error::get_text(int error) {
   return text;
 }
 
+void Error::generate_html_error_code_documentation(std::ostream &out) {
+  out << "<table border=\"1\" cellpadding=\"4\" cellspacing=\"1\" style=\"width: 720px; \">\n";
+  out << "<thead><tr><th scope=\"col\">Code<br />(hexidecimal)</th>\n";
+  out << "<th scope=\"col\">Code<br />(decimal)</th>\n";
+  out << "<th scope=\"col\">Description</th></tr></thead><tbody>\n";
+
+  for (size_t i=0; error_info[i].text; i++) {
+    if (error_info[i].code >= 0)
+      out << "<tr><td style=\"text-align: right; \"><code>0x" << std::hex << error_info[i].code << "</code></td>\n";
+    else
+      out << "<tr><td style=\"text-align: right; \"><code></code></td>\n";
+    out << "<td style=\"text-align: right; \"><code>" << std::dec << error_info[i].code << "</code></td>\n";
+    out << "<td>" << error_info[i].text << "</td></tr>\n";
+  }
+  out << "</tbody></table>\n" << std::flush;
+}
+
 namespace Hypertable {
+
+  const char *relative_fname(const Exception &e) {
+    if (e.file()) {
+      const char *ptr = strstr(e.file(), "src/cc/");
+      return ptr ? ptr : e.file();
+    }
+    return "";
+  }
 
 std::ostream &operator<<(std::ostream &out, const Exception &e) {
   out <<"Hypertable::Exception: "<< e.message() <<" - "
       << Error::get_text(e.code());
 
-  if (e.line())
-    out <<"\n\tat "<< e.func() <<" ("<< e.file() <<':'<< e.line() <<')';
+  if (e.line()) {
+    out <<"\n\tat "<< e.func() <<" (";
+    if (Logger::show_line_numbers)
+      out << e.file() <<':'<< e.line();
+    else
+      out << relative_fname(e);
+    out <<')';
+  }
 
   int prev_code = e.code();
 
   for (Exception *prev = e.prev; prev; prev = prev->prev) {
-    out <<"\n\tat "<< (prev->func() ? prev->func() : "-") <<" ("
-        << (prev->file() ? prev->file() : "-") <<':'<< prev->line() <<"): "
-        << prev->message();
+    out <<"\n\tat "<< (prev->func() ? prev->func() : "-") <<" (";
+    if (Logger::show_line_numbers)
+      out << (prev->file() ? prev->file() : "-") <<':'<< prev->line();
+    else
+      out << relative_fname(*prev);
+    out <<"): " << prev->message();
 
     if (prev->code() != prev_code) {
       out <<" - "<< Error::get_text(prev->code());

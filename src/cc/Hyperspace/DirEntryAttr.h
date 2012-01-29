@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2010 Sanjit Jhala (Hypertable, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -42,8 +42,20 @@ namespace Hyperspace {
     DirEntryAttr() {}
     // This copy constructor violates the const-ness of the parameter since
     // this attr takes ownership of the other attr StaticBuffer
-    DirEntryAttr(const DirEntryAttr &other) : name(other.name), has_attr(other.has_attr), is_dir(other.is_dir) {
+    DirEntryAttr(const DirEntryAttr &other) : name(other.name), has_attr(other.has_attr), is_dir(other.is_dir), sub_entries(other.sub_entries) {
       attr = (const_cast<DirEntryAttr&>(other)).attr;
+    }
+
+    // This assignment operator violates the const-ness of the parameter since
+    // this attr takes ownership of the other attr StaticBuffer
+    DirEntryAttr& operator =(const DirEntryAttr& other) { 
+      name = other.name;
+      has_attr = other.has_attr;
+      is_dir = other.is_dir;
+      sub_entries = other.sub_entries;
+      attr.free();
+      attr = (const_cast<DirEntryAttr&>(other)).attr;
+      return *this;
     }
 
     std::string name;
@@ -51,6 +63,8 @@ namespace Hyperspace {
     /** Boolean value indicating whether or not this entry is a directory */
     bool has_attr;
     bool is_dir;
+
+    std::vector<DirEntryAttr> sub_entries;
   };
 
   struct LtDirEntryAttr {

@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -42,18 +42,26 @@ namespace Hypertable {
     virtual void handle(Hypertable::EventPtr &event_ptr);
     virtual void schedule_maintenance();
     virtual void complete_maintenance_notify();
-    virtual bool low_memory() { return m_app_queue_paused; }
+    virtual bool low_memory() { return m_app_queue_paused || m_low_physical_memory; }
 
   private:
     Comm         *m_comm;
     RangeServer  *m_range_server;
     ApplicationQueuePtr m_app_queue;
+    int64_t       m_query_cache_memory;
     int32_t       m_timer_interval;
     int32_t       m_current_interval;
+    int64_t       m_last_low_memory_maintenance;
     bool          m_urgent_maintenance_scheduled;
     bool          m_app_queue_paused;
+    bool          m_low_physical_memory;
     boost::xtime  m_last_maintenance;
     bool          m_maintenance_outstanding;
+    int32_t       m_maintenance_queue_workers;
+    int32_t       m_app_queue_paused_ticks;
+
+    void restart_app_queue();
+    bool low_memory_mode();
   };
   typedef boost::intrusive_ptr<TimerHandler> TimerHandlerPtr;
 }

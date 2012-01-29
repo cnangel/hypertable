@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -34,13 +34,16 @@ extern "C" {
 #include "Common/Logger.h"
 #include "Common/String.h"
 #include "Common/System.h"
+#include "Common/Init.h"
 #include "Common/Properties.h"
+#include "Common/Config.h"
 #include "Common/Thread.h"
 
 #include "Hyperspace/BerkeleyDbFilesystem.h"
 
 using namespace Hyperspace;
 using namespace Hypertable;
+using namespace Config;
 using namespace std;
 
 int main(int argc, char **argv) {
@@ -49,7 +52,7 @@ int main(int argc, char **argv) {
   int ret = 0;
   bool isdir;
   PropertiesPtr props = new Properties();
-  String localhost = "localhost";
+  init_with_policy<DefaultPolicy>(argc, argv);
 
   System::initialize(System::locate_install_dir(argv[0]));
 
@@ -64,7 +67,7 @@ int main(int argc, char **argv) {
   props->set("Hyperspace.LogGc.Interval", 3600000);
   props->set("Hyperspace.LogGc.MaxUnusedLogs", 200);
 
-  bdb_fs = new BerkeleyDbFilesystem(props, localhost, filename, thread_ids);
+  bdb_fs = new BerkeleyDbFilesystem(props, filename, thread_ids);
 
   BDbTxn txn;
   bdb_fs->start_transaction(txn);

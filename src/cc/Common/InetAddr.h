@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2007 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -34,6 +34,7 @@ namespace Hypertable {
    */
   struct Endpoint {
     Endpoint(const String &host, uint16_t port) : host(host), port(port) {}
+    Endpoint() : port(0) {}
 
     String host;
     uint16_t port;
@@ -53,6 +54,10 @@ namespace Hypertable {
     InetAddr(const String &endpoint);
     InetAddr(uint32_t ip32, uint16_t port);
     InetAddr(const sockaddr_in &addr) { operator=(addr); }
+
+    size_t encoded_length() const;
+    void encode(uint8_t **bufp) const;
+    void decode(const uint8_t **bufp, size_t *remainp);
 
     InetAddr &operator=(const sockaddr_in &addr) {
       if (this != &addr)
@@ -110,6 +115,12 @@ namespace Hypertable {
      */
     static bool parse_ipv4(const char *ip, uint16_t port, sockaddr_in &addr,
                            int base = 0);
+
+    /**
+     * Tests whether the input string in n.n.n.n format (base 10)
+     * @param ip - ipv4 string
+     */
+    static bool is_ipv4(const char *ip);
 
     /** Initialize addr from an integer ip address and port */
     static bool initialize(sockaddr_in *addr, uint32_t haddr, uint16_t port);

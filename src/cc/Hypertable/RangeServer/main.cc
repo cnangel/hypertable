@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -54,7 +54,7 @@ typedef Meta::list<RangeServerPolicy, DfsClientPolicy, HyperspaceClientPolicy,
 
 int main(int argc, char **argv) {
 
-  ReactorRunner::record_arrival_clocks = true;
+  ReactorRunner::record_arrival_time = true;
 
   init_with_policies<Policies>(argc, argv);
 
@@ -80,9 +80,9 @@ int main(int argc, char **argv) {
     HyperspaceSessionHandler hs_handler;
     Global::hyperspace = new Hyperspace::Session(comm, properties);
     Global::hyperspace->add_callback(&hs_handler);
-    int timeout = get_i32("Hyperspace.Timeout");
+    int hyperspace_timeout = get_i32("Hyperspace.Timeout");
 
-    if (!Global::hyperspace->wait_for_connection(timeout)) {
+    if (!Global::hyperspace->wait_for_connection(hyperspace_timeout)) {
       HT_ERROR("Unable to connect to hyperspace, exiting...");
       exit(1);
     }

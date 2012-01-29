@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -31,12 +31,14 @@ namespace Hypertable {
   class FlyweightString {
   public:
     ~FlyweightString() {
-      for (Strings::iterator iter = m_strings.begin(); iter != m_strings.end();
+      for (CstrSet::iterator iter = m_strings.begin(); iter != m_strings.end();
            ++iter)
         delete [] *iter;
     }
     const char *get(const char *str) {
-      Strings::iterator iter = m_strings.find(str);
+      if (str == 0)
+        return 0;
+      CstrSet::iterator iter = m_strings.find(str);
       if (iter != m_strings.end())
         return *iter;
       char *constant_str = new char [strlen(str) + 1];
@@ -44,11 +46,23 @@ namespace Hypertable {
       m_strings.insert(constant_str);
       return constant_str;
     }
+    const char *get(const char *str, size_t len) {
+      if (str == 0)
+        return 0;
+      char *new_str = new char [ len + 1 ];
+      memcpy(new_str, str, len);
+      new_str[len] = 0;
+      CstrSet::iterator iter = m_strings.find(new_str);
+      if (iter != m_strings.end()) {
+        delete [] new_str;
+        return *iter;
+      }
+      m_strings.insert(new_str);
+      return new_str;
+    }
 
   private:
-    typedef std::set<const char *, LtCstr>  Strings;
-
-    Strings m_strings;
+    CstrSet m_strings;
   };
 
 }

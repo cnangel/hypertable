@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -103,7 +103,7 @@ namespace {
 
 
 bool
-IOHandlerData::handle_event(struct pollfd *event, clock_t arrival_clocks, time_t arrival_time) {
+IOHandlerData::handle_event(struct pollfd *event, time_t arrival_time) {
   int error = 0;
   bool eof = false;
 
@@ -144,7 +144,7 @@ IOHandlerData::handle_event(struct pollfd *event, clock_t arrival_clocks, time_t
           }
           else {
             m_message_header_ptr += nread;
-            handle_message_header(arrival_clocks, arrival_time);
+            handle_message_header(arrival_time);
           }
 
           if (eof)
@@ -211,7 +211,7 @@ IOHandlerData::handle_event(struct pollfd *event, clock_t arrival_clocks, time_t
 #if defined(__linux__)
 
 bool
-IOHandlerData::handle_event(struct epoll_event *event, clock_t arrival_clocks, time_t arrival_time) {
+IOHandlerData::handle_event(struct epoll_event *event, time_t arrival_time) {
   int error = 0;
   bool eof = false;
 
@@ -252,7 +252,7 @@ IOHandlerData::handle_event(struct epoll_event *event, clock_t arrival_clocks, t
           }
           else {
             m_message_header_ptr += nread;
-            handle_message_header(arrival_clocks, arrival_time);
+            handle_message_header(arrival_time);
           }
 
           if (eof)
@@ -325,7 +325,7 @@ IOHandlerData::handle_event(struct epoll_event *event, clock_t arrival_clocks, t
 
 #elif defined(__sun__)
 
-bool IOHandlerData::handle_event(port_event_t *event, clock_t arrival_clocks, time_t arrival_time) {
+bool IOHandlerData::handle_event(port_event_t *event, time_t arrival_time) {
   int error = 0;
   bool eof = false;
 
@@ -368,7 +368,7 @@ bool IOHandlerData::handle_event(port_event_t *event, clock_t arrival_clocks, ti
           }
           else {
             m_message_header_ptr += nread;
-            handle_message_header(arrival_clocks, arrival_time);
+            handle_message_header(arrival_time);
           }
 
           if (eof)
@@ -443,7 +443,7 @@ bool IOHandlerData::handle_event(port_event_t *event, clock_t arrival_clocks, ti
 /**
  *
  */
-bool IOHandlerData::handle_event(struct kevent *event, clock_t arrival_clocks, time_t arrival_time) {
+bool IOHandlerData::handle_event(struct kevent *event, time_t arrival_time) {
 
   //DisplayEvent(event);
 
@@ -479,7 +479,7 @@ bool IOHandlerData::handle_event(struct kevent *event, clock_t arrival_clocks, t
             assert(nread == m_message_header_remaining);
             available -= nread;
             m_message_header_ptr += nread;
-            handle_message_header(arrival_clocks, arrival_time);
+            handle_message_header(arrival_time);
           }
           else {
             nread = FileUtils::read(m_sd, m_message_header_ptr, available);
@@ -538,7 +538,7 @@ bool IOHandlerData::handle_event(struct kevent *event, clock_t arrival_clocks, t
 #endif
 
 
-void IOHandlerData::handle_message_header(clock_t arrival_clocks, time_t arrival_time) {
+void IOHandlerData::handle_message_header(time_t arrival_time) {
   size_t header_len = (size_t)m_message_header[1];
 
   // check to see if there is any variable length header
@@ -549,8 +549,8 @@ void IOHandlerData::handle_message_header(clock_t arrival_clocks, time_t arrival
     return;
   }
 
+  m_event = new Event(Event::MESSAGE, m_addr);
   m_event->load_header(m_sd, m_message_header, header_len);
-  m_event->arrival_clocks = arrival_clocks;
   m_event->arrival_time = arrival_time;
 
 #if defined(__linux__)
@@ -569,7 +569,6 @@ void IOHandlerData::handle_message_header(clock_t arrival_clocks, time_t arrival
   m_message_remaining = m_event->header.total_len - header_len;
   m_message_header_remaining = 0;
   m_got_header = true;
-
 }
 
 
@@ -579,6 +578,8 @@ void IOHandlerData::handle_message_body() {
   if (m_event->header.flags & CommHeader::FLAGS_BIT_PROXY_MAP_UPDATE) {
     ReactorRunner::handler_map->update_proxies((const char *)m_message,
                   m_event->header.total_len - m_event->header.header_len);
+    delete [] m_message;
+    delete m_event;
     //HT_INFO("proxy map update");
   }
   else if ((m_event->header.flags & CommHeader::FLAGS_BIT_REQUEST) == 0 &&

@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -27,7 +27,8 @@
 
 using namespace Hypertable;
 
-void RangeStatsGatherer::fetch(RangeStatsVector &range_stats) {
+void RangeStatsGatherer::fetch(RangeStatsVector &range_stats,
+                               size_t *lenp, TableMutator *mutator) {
   std::vector<TableInfoPtr> table_vec;
 
   range_stats.clear();
@@ -43,10 +44,13 @@ void RangeStatsGatherer::fetch(RangeStatsVector &range_stats) {
 
   time_t now = time(0);
 
+  if (lenp)
+    *lenp = table_vec.size();
+
   for (size_t i=0,j=0; i<table_vec.size(); i++) {
     table_vec[i]->get_range_vector(m_range_vec);
     for (; j<m_range_vec.size(); j++)
-      range_stats.push_back(m_range_vec[j]->get_maintenance_data(m_arena, now));
+      range_stats.push_back(m_range_vec[j]->get_maintenance_data(m_arena, now, mutator));
   }
 
 }

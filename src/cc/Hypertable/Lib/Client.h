@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2010 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -70,9 +70,11 @@ namespace Hypertable {
      * @param base optional base Namespace (if specified the name parameter will be relative
      *        to base)
      * @param create_intermediate if true then create all non-existent intermediate namespaces
+     * @param if_not_exists don't throw an exception if namespace does exist
      */
     void create_namespace(const String &name, Namespace *base=NULL,
-                          bool create_intermediate=false);
+                          bool create_intermediate=false,
+                          bool if_not_exists=false);
 
     /**
      * Opens a Namespace
@@ -107,6 +109,9 @@ namespace Hypertable {
     void drop_namespace(const String &name, Namespace *base=NULL, bool if_exists=false);
 
     Hyperspace::SessionPtr& get_hyperspace_session();
+
+    MasterClientPtr get_master_client();
+
     void close();
     void shutdown();
 
@@ -134,7 +139,6 @@ namespace Hypertable {
     NamespaceCachePtr       m_namespace_cache;
     Mutex                   m_mutex;
     bool                    m_hyperspace_reconnect;
-    bool                    m_refresh_schema;
     String                  m_toplevel_dir;
   };
 

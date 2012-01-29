@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2010 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -79,7 +79,7 @@ void cmd_help(ParserState &state, HqlInterpreter::Callback &cb) {
       cb.on_return(*text);
   }
   else
-    cb.on_return("\no help for '" + state.str);
+    cb.on_return("\nno help for '" + state.str + "'");
 }
 
 void
@@ -155,7 +155,7 @@ cmd_show_create_table(NamespacePtr &ns, ParserState &state,
   String out_str;
   String schema_str = ns->get_schema_str(state.table_name, true);
   SchemaPtr schema = Schema::new_instance(schema_str.c_str(),
-                                          schema_str.length(), true);
+                                          schema_str.length());
   if (!schema->is_valid())
     HT_THROW(Error::BAD_SCHEMA, schema->get_error_string());
 
@@ -176,7 +176,7 @@ cmd_create_table(NamespacePtr &ns, ParserState &state,
 
   if (!state.clone_table_name.empty()) {
     schema_str = ns->get_schema_str(state.clone_table_name, true);
-    schema = Schema::new_instance(schema_str.c_str(), schema_str.size(), true);
+    schema = Schema::new_instance(schema_str.c_str(), schema_str.size());
     schema_str.clear();
     schema->render(schema_str);
     ns->create_table(state.table_name, schema_str.c_str());
@@ -226,6 +226,10 @@ cmd_create_table(NamespacePtr &ns, ParserState &state,
         HT_THROWF(Error::HQL_PARSE_ERROR,
                   "Incompatible options (COUNTER & MAX_VERSIONS) specified for column '%s'",
                   cf->name.c_str());
+      if (!cf->time_order_desc_set) {
+        cf->time_order_desc = state.time_order_desc;
+        cf->time_order_desc_set = true;
+      }
       schema->add_column_family(cf);
     }
 
@@ -426,6 +430,10 @@ cmd_select(NamespacePtr &ns, ConnectionManagerPtr &conn_manager,
         fout.write(unescaped_buf, unescaped_len);
         fout << "\tDELETE CELL\n";
         break;
+      case FLAG_DELETE_CELL_VERSION:
+        fout.write(unescaped_buf, unescaped_len);
+        fout << "\tDELETE CELL VERSION\n";
+        break;
       default:
         fout << "\tBAD KEY FLAG\n";
       }
@@ -436,7 +444,7 @@ cmd_select(NamespacePtr &ns, ConnectionManagerPtr &conn_manager,
 
   fout.strict_sync();
 
-  cb.on_finish(0);
+  cb.on_finish((TableMutator*)0);
 }
 
 
@@ -543,7 +551,7 @@ cmd_dump_table(NamespacePtr &ns,
 
   fout.strict_sync();
 
-  cb.on_finish(0);
+  cb.on_finish((TableMutator*)0);
 }
 
 void
@@ -560,10 +568,14 @@ cmd_load_data(NamespacePtr &ns, ::uint32_t mutator_flags,
   FILE *outf = cb.output;
   int out_fd = -1;
   bool largefile_mode = false;
-  int64_t last_total = 0, new_total;
+  ::uint64_t running_total = 0;
+  ::uint64_t consume_threshold = 0;
 
   if (LoadDataFlags::ignore_unknown_cfs(state.load_flags))
-    mutator_flags |= TableMutator::FLAG_IGNORE_UNKNOWN_CFS;
+    mutator_flags |= Table::MUTATOR_FLAG_IGNORE_UNKNOWN_CFS;
+
+  // Turn on no-log-sync unconditionally for LOAD DATA INFILE
+  mutator_flags |= Table::MUTATOR_FLAG_NO_LOG_SYNC;
 
   if (state.table_name.empty()) {
     if (state.output_file.empty())
@@ -587,6 +599,7 @@ cmd_load_data(NamespacePtr &ns, ::uint32_t mutator_flags,
 
 
   LoadDataSourcePtr lds;
+  bool is_delete;
 
   // init Dfs client if not done yet
   if(state.input_file_src == DFS_FILE && !dfs_client)
@@ -594,13 +607,14 @@ cmd_load_data(NamespacePtr &ns, ::uint32_t mutator_flags,
 
   lds = LoadDataSourceFactory::create(dfs_client, state.input_file, state.input_file_src,
       state.header_file, state.header_file_src,
-      state.key_columns, state.timestamp_column,
+      state.columns, state.timestamp_column,
       state.row_uniquify_chars, state.load_flags);
 
   cb.file_size = lds->get_source_size();
   if (cb.file_size > std::numeric_limits<unsigned long>::max()) {
     largefile_mode = true;
     unsigned long adjusted_size = (unsigned long)(cb.file_size / 1048576LL);
+    consume_threshold = 1048576LL;
     cb.on_update(adjusted_size);
   }
   else
@@ -617,7 +631,7 @@ cmd_load_data(NamespacePtr &ns, ::uint32_t mutator_flags,
   KeySpec key;
   ::uint8_t *value;
   ::uint32_t value_len;
-  ::uint32_t consumed;
+  ::uint32_t consumed = 0;
   LoadDataEscape row_escaper;
   LoadDataEscape qualifier_escaper;
   LoadDataEscape value_escaper;
@@ -626,7 +640,7 @@ cmd_load_data(NamespacePtr &ns, ::uint32_t mutator_flags,
 
   try {
 
-    while (lds->next(0, &key, &value, &value_len, &consumed)) {
+    while (lds->next(&key, &value, &value_len, &is_delete, &consumed)) {
 
       ++cb.total_cells;
       cb.total_values_size += value_len;
@@ -651,7 +665,10 @@ cmd_load_data(NamespacePtr &ns, ::uint32_t mutator_flags,
 
       if (into_table) {
         try {
-          mutator->set(key, escaped_buf, escaped_len);
+          if (is_delete)
+            mutator->set_delete(key);
+          else
+            mutator->set(key, escaped_buf, escaped_len);
         }
         catch (Exception &e) {
           do {
@@ -669,17 +686,20 @@ cmd_load_data(NamespacePtr &ns, ::uint32_t mutator_flags,
 
       if (cb.normal_mode && state.input_file_src != STDIN) {
         if (largefile_mode == true) {
-          new_total = last_total + consumed;
-          consumed = (unsigned long)((new_total / 1048576LL) - (last_total / 1048576LL));
-          last_total = new_total;
+	  running_total += consumed;
+	  if (running_total >= consume_threshold) {
+	    consumed = 1 + (unsigned long)((running_total - consume_threshold) / 1048576LL);
+	    consume_threshold += (::uint64_t)consumed * 1048576LL;
+	    cb.on_progress(consumed);
+	  }
         }
-        cb.on_progress(consumed);
+	else
+	  cb.on_progress(consumed);
       }
     }
   }
   catch (Exception &e) {
-    HT_THROW2F(Error::HQL_BAD_LOAD_FILE_FORMAT, e,
-        "line number %lld", (Lld)lds->get_current_lineno());
+    HT_THROW2F(e.code(), e, "line number %lld", (Lld)lds->get_current_lineno());
   }
 
   fout.strict_sync();
@@ -733,13 +753,20 @@ cmd_delete(NamespacePtr &ns, ParserState &state, HqlInterpreter::Callback &cb) {
   key.row = state.delete_row.c_str();
   key.row_len = state.delete_row.length();
 
-  if (state.delete_time != 0)
-    key.timestamp = ++state.delete_time;
+  if (state.delete_version_time) {
+    key.flag = FLAG_DELETE_CELL_VERSION;
+    key.timestamp = state.delete_version_time;
+  }
+  else if (state.delete_time) {
+    key.flag = FLAG_DELETE_CELL;
+    key.timestamp = state.delete_time;
+  }
   else
     key.timestamp = AUTO_ASSIGN;
 
   if (state.delete_all_columns) {
     try {
+      key.flag = FLAG_DELETE_ROW;
       mutator->set_delete(key);
     }
     catch (Exception &e) {
@@ -756,10 +783,13 @@ cmd_delete(NamespacePtr &ns, ParserState &state, HqlInterpreter::Callback &cb) {
         *column_qualifier++ = 0;
         key.column_qualifier = column_qualifier;
         key.column_qualifier_len = strlen(column_qualifier);
+        if (key.flag != FLAG_DELETE_CELL_VERSION)
+          key.flag = FLAG_DELETE_CELL;
       }
       else {
         key.column_qualifier = 0;
         key.column_qualifier_len = 0;
+        key.flag = FLAG_DELETE_COLUMN_FAMILY;
       }
       try {
         mutator->set_delete(key);
@@ -780,7 +810,7 @@ cmd_get_listing(NamespacePtr &ns, ParserState &state,
   if (!ns)
     HT_THROW(Error::BAD_NAMESPACE, "Null namespace");
   std::vector<NamespaceListing> listing;
-  ns->get_listing(listing);
+  ns->get_listing(false, listing);
   foreach (const NamespaceListing &entry, listing) {
     if (entry.is_namespace && !state.tables_only)
       cb.on_return(entry.name + "\t(namespace)");
@@ -800,8 +830,18 @@ cmd_drop_table(NamespacePtr &ns, ParserState &state,
   cb.on_finish();
 }
 
-void cmd_shutdown(Client *client, HqlInterpreter::Callback &cb) {
-  client->close();
+void
+cmd_balance(Client *client, ParserState &state,
+            HqlInterpreter::Callback &cb) {
+  MasterClientPtr master = client->get_master_client();
+
+  master->balance(state.balance_plan);
+
+  cb.on_finish();
+}
+
+
+void cmd_shutdown_master(Client *client, HqlInterpreter::Callback &cb) {
   client->shutdown();
   cb.on_finish();
 }
@@ -818,7 +858,7 @@ HqlInterpreter::HqlInterpreter(Client *client, ConnectionManagerPtr &conn_manage
     bool immutable_namespace) : m_client(client), m_mutator_flags(0),
     m_conn_manager(conn_manager), m_dfs_client(0), m_immutable_namespace(immutable_namespace) {
   if (Config::properties->get_bool("Hypertable.HqlInterpreter.Mutator.NoLogSync"))
-    m_mutator_flags = TableMutator::FLAG_NO_LOG_SYNC;
+    m_mutator_flags = Table::MUTATOR_FLAG_NO_LOG_SYNC;
 
 }
 
@@ -875,8 +915,8 @@ void HqlInterpreter::execute(const String &line, Callback &cb) {
                      state, cb);                                   break;
     case COMMAND_CLOSE:
       cmd_close(m_client, cb);                                     break;
-    case COMMAND_SHUTDOWN:
-      cmd_shutdown(m_client, cb);                                  break;
+    case COMMAND_SHUTDOWN_MASTER:
+      cmd_shutdown_master(m_client, cb);                           break;
     case COMMAND_CREATE_NAMESPACE:
       cmd_create_namespace(m_client, m_namespace, state, cb);      break;
     case COMMAND_USE_NAMESPACE:
@@ -884,6 +924,8 @@ void HqlInterpreter::execute(const String &line, Callback &cb) {
                         m_immutable_namespace, state, cb);         break;
     case COMMAND_DROP_NAMESPACE:
       cmd_drop_namespace(m_client, m_namespace, state, cb);        break;
+    case COMMAND_BALANCE:
+      cmd_balance(m_client, state, cb);                            break;
 
     default:
       HT_THROW(Error::HQL_PARSE_ERROR, String("unsupported command: ") + stripped_line);

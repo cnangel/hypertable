@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -36,10 +36,12 @@ namespace Hypertable {
     ResponseCallbackCreateScanner(Comm *comm, EventPtr &event_ptr)
       : ResponseCallback(comm, event_ptr) { }
 
-    int response(short moreflag, int32_t id, StaticBuffer &ext);
+    int response(short moreflag, int32_t id, StaticBuffer &ext,
+         int32_t skipped_rows, int32_t skipped_cells);
+
     int response(short moreflag, int32_t id, 
-		 boost::shared_array<uint8_t> &ext_buffer,
-		 uint32_t ext_len);
+         boost::shared_array<uint8_t> &ext_buffer, uint32_t ext_len,
+         int32_t skipped_rows, int32_t skipped_cells);
   };
 
 }

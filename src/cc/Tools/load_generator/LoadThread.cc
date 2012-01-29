@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2010 Doug Judd (Hypertable, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -40,7 +40,7 @@ void LoadThread::operator()() {
     HT_FATAL_OUT << e << HT_END;
   }
 
-  while (!m_state.finished) {
+  while (!m_state.finished || !m_state.requests.empty()) {
     while (m_state.requests.empty() && !m_state.finished)
       m_state.cond.wait(lock);
     if (!m_state.requests.empty()) {
@@ -65,7 +65,7 @@ void LoadThread::operator()() {
         m_state.min_latency = latency;
       if (latency > m_state.max_latency)
         m_state.max_latency = latency;
-      
+
       m_state.requests.pop_front();
       m_state.garbage.push_back(request);
     }

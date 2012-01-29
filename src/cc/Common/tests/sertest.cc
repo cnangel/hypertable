@@ -1,3 +1,24 @@
+/**
+ * Copyright (C) 2007-2012 Hypertable, Inc.
+ *
+ * This file is part of Hypertable.
+ *
+ * Hypertable is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * as published by the Free Software Foundation; either version 3
+ * of the License, or any later version.
+ *
+ * Hypertable is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ * 02110-1301, USA.
+ */
+
 #include "Common/Compat.h"
 #include "Common/Init.h"
 #include "Common/Logger.h"
@@ -117,6 +138,49 @@ void test_vstr() {
     HT_ASSERT(!strcmp(decode_vstr(&p2, &len), input));
     HT_ASSERT(p2 - buf == (int)(encoded_length_vstr(input)));
     HT_ASSERT(len == sizeof(buf) - (p2 - buf)));
+}
+
+void test_double() {
+  double val;
+  uint8_t buf[128], *p = buf;
+  const uint8_t *p2;
+  size_t remain = sizeof(buf);
+
+  val = 123456789876543212.123456789876543212;
+  encode_double(&p, val);
+  p2 = buf;
+  HT_ASSERT(decode_double(&p2, &remain) == 123456789876543212.123456789876543212);
+
+  val = -123456789876543212.123456789876543212;
+  encode_double(&p, val);
+  p2 = buf;
+  HT_ASSERT(decode_double(&p2, &remain) == -123456789876543212.123456789876543212);
+
+  val = 0.123456789876543212;
+  encode_double(&p, val);
+  p2 = buf;
+  HT_ASSERT(decode_double(&p2, &remain) == 0.123456789876543212);
+
+  val = -0.123456789876543212;
+  encode_double(&p, val);
+  p2 = buf;
+  HT_ASSERT(decode_double(&p2, &remain) == -0.123456789876543212);
+
+  val = 123456789876543212.0;
+  encode_double(&p, val);
+  p2 = buf;
+  HT_ASSERT(decode_double(&p2, &remain) == 123456789876543212.0);
+
+  val = -123456789876543212.0;
+  encode_double(&p, val);
+  p2 = buf;
+  HT_ASSERT(decode_double(&p2, &remain) == -123456789876543212.0);
+
+  val = 0.0;
+  encode_double(&p, val);
+  p2 = buf;
+  HT_ASSERT(decode_double(&p2, &remain) == 0.0);
+
 }
 
 void test_bad_vi32() {

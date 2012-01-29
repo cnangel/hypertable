@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2007 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -116,6 +116,13 @@ void md5_hex(const void *input, size_t ilen, char output[33]);
  * \param output   Hex string representation of MD5 checksum
  */
 void md5_string(const char *input, char output[33]);
+
+/**
+ * \brief          Returns 64-bit hash checksum
+ *
+ * \param input    input string
+ */
+int64_t md5_hash(const char *input);
 
 /**
  * \brief          Get the modified base64 encoded string of the first 12 Bytes of the 16 Byte

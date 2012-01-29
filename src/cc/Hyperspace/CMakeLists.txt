@@ -1,11 +1,11 @@
 #
-# Copyright(C) 2008 Doug Judd (Zvents, Inc.)
+# Copyright (C) 2007-2012 Hypertable, Inc.
 #
 # This file is part of Hypertable.
 #
 # Hypertable is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
-# as published by the Free Software Foundation; version 2 of
+# as published by the Free Software Foundation; version 3 of
 # the License.
 #
 # Hypertable is distributed in the hope that it will be useful,
@@ -35,7 +35,7 @@ HsClientState.cc
 
 # Hyperspace library
 add_library(Hyperspace ${Hyperspace_SRCS})
-target_link_libraries(Hyperspace ${BDB_LIBRARIES} HyperTools)
+target_link_libraries(Hyperspace HyperTools)
 
 set(Master_SRCS
 StateDbKeys.cc
@@ -90,7 +90,7 @@ endif ()
 
 # Hyperspace.Master
 add_executable(Hyperspace.Master ${Master_SRCS})
-target_link_libraries(Hyperspace.Master Hyperspace ${HYPERSPACE_MALLOC_LIBRARY})
+target_link_libraries(Hyperspace.Master Hyperspace ${BDB_LIBRARIES} ${HYPERSPACE_MALLOC_LIBRARY})
 
 # BerkeleyDbFilesystem test
 add_executable(bdb_fs_test tests/bdb_fs_test.cc BerkeleyDbFilesystem.cc StateDbKeys.cc)

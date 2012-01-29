@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2010 Doug Judd (Hypertable, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -38,12 +38,13 @@ public class ProgressMeterVertical {
     mCount += increment;
     int pct = (int)((mCount*100) / mExpectedCount);
     if (pct > mLastPercentage) {
+      long elapsed_secs = (System.currentTimeMillis()-mStartTime)/1000;
       if (pct < 10)
-        System.out.println("  " + pct + "% complete.");
+        System.out.println("  " + pct + "% complete\t" + elapsed_secs);
       else if (pct < 100)
-        System.out.println(" " + pct + "% complete.");
+        System.out.println(" " + pct + "% complete\t" + elapsed_secs);
       else
-        System.out.println(pct + "% complete.");
+        System.out.println(pct + "% complete\t" + elapsed_secs);
       System.out.flush();
       mLastPercentage = pct;
     }
@@ -58,6 +59,7 @@ public class ProgressMeterVertical {
     }
   }
 
+  private long mStartTime = System.currentTimeMillis();
   private long mCount;
   private long mExpectedCount;
   private int  mLastPercentage;

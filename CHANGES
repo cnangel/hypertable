@@ -1,3 +1,515 @@
+Version 0.9.5.5:
+(2012-01-28)
+
+    Upgraded to Thrift 0.8.0
+    Issue #760: Changed LICENSE.txt and copyright header in sources to GPL v3
+    Added ability to disable block cache; Disabled it for now
+    Fixed concurrency problems in TableMutator classes
+    Fixed deadlocks in update path
+    Fixed race condition leading to deadlock in TableMutator
+    Fixed error propagation in scanner
+    Only account for QueryCache fill in MemoryTracker
+    Fixed BlockCache problem when not enough room to hold block
+    Improved response time if TableScanner recovers from RANGESERVER_RANGE_NOT_FOUND error
+    More updates to PerformanceTest
+    Added missing member initialization to ScanSpec constructor
+    Got rid of unused function
+    Fixed qualifier regex logic
+    Fixed mis-interpretation of CREATE_INTERMEDIATE in Client::create_namespace
+    Fixed bug recently introduce in the update path
+    issue 773: Removed deadlock in TableMutatorAsync
+    Fixed bug recently introduced in PerformanceTest causing value-data file to be null
+    Issue #766: cronolog is now packaged into /bin directory
+    Issue #734: Removed dependency to librrd
+    Added BlockCount field to METADATA table
+    Improved integration tests; several tests are now running more reliable
+    Added memory mapped CMF data file for Zipfian random number generator
+    Issue #484: Added a regression test
+    Issue #743: Added function error_get_text which returns a string describing an error number
+    Issue #672, #758: Serverup tool now connects to local master instead of the one listed in hyperspace
+    PerformanceTest improvements; Got random read tests working
+    issue 745: fixed missing dependency problem on mac
+    Added additional 3 second clock skew leeway in Master register server
+    Made RangeServer::acknowledge_load request URGENT
+    issue 754: Added support MAX_VERSIONS <n> (e.g. without '=')
+    Modified Hypertable perftest to run over multiple interfaces
+    Added missing Thrift Client interface libraries to installation
+    Updated Thrift client_test examples to reflect recent API name changes
+    Fixed thrift-reconnect-hyperspace test
+
+Version 0.9.5.4:
+(2011-12-21)
+
+    Added MapR broker
+    Patch to fix hang problem in low memory condition
+    Atomically get multiple attribute values in Hyperspace
+    issue 744: Renamed thriftbroker package to thriftbroker-only
+    Thrift API name changes
+    More Thrift API Name changes (hql_ and offer_ to shared_mutator_)
+    Fixed segfault on dfsclient with shutdown command
+    issue 732: Fix to stop-servers.sh to shut down DFS broker cleanly
+    Changed # of maint. threads to max(1.5*disks, cpu_core_count)
+    issue 745: Hack to copy missing libintl.8.dylib on mac
+    Fixed thrift-table-refresh test (forgot to reflect Thrift API changes)
+    More fixes to PerformanceTest code
+    Got rid of recursion (and possible stack overflow) in MergeScanner
+    Added generate_error_code_doc tool for auto-generating Error Codes docs
+    Cleaned up Thrift API Names
+    Added elapsed seconds to java vertical progress meter
+    Fixed bug in Boost uuid wrapper
+    Fixed bug in java String de-serialization routine
+    Fix for crash in scan with cell_interval and end_row=0
+    Added TIME_ORDER DESC markdown documentation
+    issue 728: Use Boost UUID generation libaray
+
+Version 0.9.5.3:
+(2011-11-21)
+
+    Added support for OFFSET, CELL_OFFSET
+    Fixed bug in TableInfo
+    Fixed bug in Monitoring class where the last and current server sets were incorrectly compared.
+    Added support for TIME_ORDER DESC and HyperAppHelper::create_cell_unique for the PHP microblog sample
+    Added support for chronological timestamps and unique values
+    Andy's Hyperspace performance improvements
+    Added support for .tar.bz2 to install_pkg Capfile task
+    Changed Mac package name to include OSX version number
+    Fixed missing library dependency on Mac OSX Lion
+    Added OFFLOAD algorithm to basic load balancer, to move ranges of a list of servers.
+    Updated performance test with latest HBase and Zookeeper
+    Added regression test for issue #719
+    Fixed issue #720: LOAD DATA INTO FILE now skips empty values
+    Fixed CELL_LIMIT_CF prob in ThriftBroker; Updated documentation
+    Prefetch schemas from Hyperspace to speed up local recovery in RangeServer
+    Fixed issue #718 - cpp thrift client is now installed in /lib/cpp
+
+Version 0.9.5.2:
+(2011-10-24)
+
+    Fixed bug in balancer that caused Master crash on pre-existing DBs
+
+Version 0.9.5.1:
+(2011-10-17)
+
+    Added Snappy compression, made it default for CellStores
+    Upgraded to Thrift 0.7.0
+    Upgraded to Hadoop CDH3u1
+    Added CELL_LIMIT to ScanSpec and SELECT command
+    Renamed CELL_LIMIT to CELL_LIMIT_PER_FAMILY
+    Made range split size random value SplitSize + (RamdomNumber % SplitSize)
+    Fixed bug in RangeServer::local_recover()
+    Added check for clock skew in OperationRegisterServer
+    Added CPU statistics to range server monitoring graphs
+    Fixed bugs in Balance operation.
+    Fixed bug in LoadBalancerBasic.
+    Changed TableInfo to store range start and end row.
+    Fixed bug in RangeServer, whereby it was possible for it to incorrectly return TABLE_NOT_FOUND.
+    Fixed performance test Capfile so that Client can run on same machine as Master
+    Added support for pulling value data from file in PerformanceTest
+    Added dependent libs to fix missing shared object problem on Debian
+    Added scripts for setting up build env on CentOS, Debian, and OpenSUSE
+    Added new switch --namespace to the shell to automatically open a specified namespace
+    Fixed command line parameter -h which failed to display the help page
+    Fixed a compiler warning about missing parentheses
+    Fixed a typo when calling 'help' with an unknown argument
+    use getenv() instead of _ENV, since _ENV can be disabled in php.ini
+    Modified Range class to prevent further maintenance if relinquished
+    Added in_operation bit to master.
+    Fixed monitoring diff calcuations, only compute if server set same as previous
+    Changed the balance trigger on the master.
+    Changed RangeServerConnection state member to include BALANCED bit
+    Made OperationBalance a perpetual operation.
+    Added FailureInducer label to crash the master in the middle of executing a balance.
+    Added automatic update coalesce
+    Separate controls in Capfile for stop and clean prompt; Dropped countdown
+    issue 706: Fixed initialization problem of Range member removed_from_working_set
+    Changed a misleading error message.
+    Added Ajax counter which displays the number of new tweets. Also improved error reporting if HT is not running or no
+    issue 696: patch to previous fix
+    issue 704: fixed intermittent CellStore-garbage-collection test failure
+    Set default # of maintenance threads to 1.5 * number of drives in system
+    Changed commit log compressor back to quicklz
+    Got rid of BLOCKED state in Master operations in favor of blocked bit
+    issue 696: Fixed race condition in Master handling of relinquish acknowledge
+    Fixed monitoring rate calculation problem when get_statistics fails on some RSs
+    Added initial revision of the microblog php sample to the reporitory
+    Added table id to error message
+    Added cell_limit and cell_limit_per_family to Thrift ScanSpec operator <<
+    Future cancel individual scanners/mutators test added
+    Future issues fixed
+    Added ThriftBroker APIs cancel_mutator_async(mutator) and cancel_scanner_async(scanner)
+    Thrift API change. Removed flush argument from close_mutator call
+    Changed default compressors to snappy
+    Don't remove monitoring data in clean-database.sh
+    Fixed possible problem with request timeout calculation; Added bettter logging
+    Changed exception and api call logging in ThriftBroker.
+    Fixed bug in snappy codec
+    Got rid of arrival_clocks in favor of arrival_time in Comm layer
+    Fixed shutdown hook in HdfsBroker
+    Changed exit calls to _exit to prevent core dumps on async abrupt end tests
+    issue 691: During relinuish, if range removed from live set, set flag to prevent re-removal
+    Added property Hypertable.RangeServer.IgnoreClockSkewErrors to make RangeServer ignore clock skew errors.
+    Fixed a PHP warning because of an undefined variable (E_NONE)
+    Fixed library paths and names on Ubuntu 11.04 64bit
+    Removed a PHP warning if an environment variable is not set
+    Eliminated warning
+    Added regression test for balance operation when a new rangeserver is added.
+    Minor thriftbroker issues fixed
+    Fixed bug in TableScannerAsync
+    Enhanced FailureInducer to support throwing arbitrary exceptions.
+    Added FileUtils::mmap and use it to map source file in load_generator
+    Merging Sanjit's regex patch
+    Dropping tables before creating them; otherwise test fails if they already existed
+    Fixed wrong event timeouts on 32bit linux: clock_t is signed long but was compared against unsigned int. Also beauti
+    Refactored MergeScanner and split in two classes: MergeScannerAccessGroup and MergeScannerRange. No functional chang
+    Fixed intermittent NULL pointer dereference in master recently introduced
+    Fixed progress meter logic for large datasets (>4GB)
+    Copy libsnappy into installation
+    Fixed linker errors on ubuntu 11.04/cmake 2.8.3: thrift files were generated but neither compiled nor linked
+    Fixed sigar detection: link against ldl on Linux
+    Added missing files for snappy integration
+    Added support for google's snappy compression library
+    fixing more warnings about macros used with empty arguments
+    fixed warning about empty macros
+    fixes for ubuntu 11.04 (32bit)
+    always link with -ldl
+    Plumbed CELL_LIMIT_PER_FAMILY through ThriftBroker
+    Added version info to monitoring UI; Removed hardcoded monitoring dir reference
+    Reorganized library layout.
+    Added four levels to Maintenance queue to allow METADATA to be handled before USER, etc.
+    Fixed intermittent test failures
+    Fixed intermittent prune_tsv test failure
+    Added cmake support for BerkeleyDB 5.2
+    issue 688: Set proxy name member for comm layer TIMEOUT events
+    Added DUMP command to Hyperspace shell.
+    Made change to ThriftBroker to flush asynchronous mutators if there is enough to flush.
+    fixes to_full_key if FLAG_DELETE_ROW has been specified
+    - support bdb 5.2 (replication API changes)
+    Andy's patches for a few 0.9.5.0 issues.
+    Enabled use of DFS replication factor.
+    Added config param Hypertable.Master.Split.SoftLimitEnabled (true by default).
+    Fixed minor compilation issue
+    [Issue 640] Fixed  Have "cap cleandb" prompt for confirmation
+    issue 685: Changed assert to exception throw
+    Fixed issues 678 & 679 (assert in LoadBalancerBasicDistributeLoad and TableMutatorAsync)
+    Added latency measurment to Thrift API logging
+    Added support for -DPACKAGE_OS_SPECIFIC=1 cmake flag to build OS specific packages
+    [issue 661] Fixed ThriftBroker dies on RangeServer exception
+    [Issue 641] Create CellStoreBlockIndexArray and make it default. Implemented
+    Fixed CellStore-garbage-collection test on mac
+    Eliminated warning
+    issue 657: Fixed rs_metrics_table initialization problem
+    Fixed tcmalloc heap introspection call on 32-bit systems
+
+
+Version 0.9.5.0:
+(2011-07-24)
+
+    Added Asynchronous Mutators
+    Added Load Balancer    
+    Fixed RSML write race condition on shutdown
+    Added FLAG_DELETE_CELL_VERSION to allow a specific version of a cell to be deleted.
+    Fixed problem with COUNTER support in MergeScanner causing corrupt keys
+    Fixed CellStoreV5 memory tracking
+    Fixed ApplicationHandler leak on timeout; RangeServer.Scanner.Ttl default to 1800s
+    Fixed Event object leak in Comm layer
+    Improved CellStore memory tracking; Fixed merging compaction scheduling; dropped MIXED prioritization
+    Added CellStore count monitoring graph for RangeServers
+    Added scanner_count graphs to monitoring interface
+    Added heap_size, heap_slack, and tracked_memory RangeServer monitoring graphs
+    Fixed bug in RangeServer where the server would crash while processing some queries.
+    Fixed bug whereby TableMutatorAsync timeout errors were being dropped.
+    [Issue 527] Partially implemented. Thrift API partially incomplete
+    Added paging statistics graphs to RangeServer monitoring page
+    Fixed support for DELETE records in LoadDataSource.cc
+    Fix to unacknowledged move cache patch
+    [issue 637] Fixed: problem with delete cell with timestamp
+    Fixed a couple of minor bugs in metalog_dump tool.
+    Added METADATA SYNC command to rsclient
+    Added assert(timeout!=0) in Comm layer; Added/Improved some log messages
+    Added Hypertable.LoadBalancer.Enable property to allow for disabling balancer
+    Added removal of Range entity from RSML at end of relinquish operation
+    Added support for move compactions; Added COMPACT command to rsclient
+    Added unacknowledged_move cache to Master to avoid repeated move
+    Made changes to LoadBalancer to ignore RangeServers that are not live yet.
+    Reduced Range split size for Balance-Mechanics tests to avoid running out of file handles.
+    Improved bloom filter regression tests
+    [issue 285] ThriftBroker requires a restart after hypertable server processes are restarted
+    Skip over RS_METRICS entries where version != 2
+    Fixed SystemInfo network rx/tx calculation
+    issue 639: Changed sort order to be numeric on RangeServer Monitoring page
+    Fixed race condition in TableMutatorAsync as well as bug in async_api_test.
+    Fixed couple of minor test issues.
+    Modified LoadMetricsRange to delete entries for "old" range after a split.
+    issue 630: use hostname instead of IP on RS page; Improved graph colors
+    Improved merge algorithm by merging long runs of CellStores < TargetSize.Minimum
+    Added complete AccessGroup information to RangeServer::dump
+    issue 636: Fixed bogus RangeServer shutdown error message
+    Eliminated superfluous memory allocations during log replay
+    Added --heapprofile to start-rangeserver.sh
+    Fixed a couple of uninitialized memory references
+    Fixed bug in ScanSpec end_row specification.
+    Changed default value of Hyperspace.LogGc.Interval to 10 mins instead of 1 hr
+    Fixed couple of possibly buggy comparisons in TableMutatorAsync code.
+    Added completed method to ResultCallback so applications can be notified when outstanding async calls are complete.
+    Added "heapcheck" command to RangeServer for dumping heap stats
+    Fixed race condition in TableMutatorAsync code.
+    Added stop_monitoring and start_monitoring cap commands.
+    Removed over-aggressive assert in TableMutatorAsyncDispatchHandler destructor.
+    Fixed a couple of warnings
+    Make Monitoring class map servers by location instead of id
+    If RangeServer.ProxyName equals "*" generate Location name using hostname+port
+    Added balancing mechanics
+    Minor fix to Thrift future calls.
+    Replaced TableMutator code with new mutator code based on TableMutatorAsync
+
+Version 0.9.5.0.pre6:
+(2011-06-03)
+
+    Fixed bug in MaintenanceScheduler introduced w/ merging compactions
+    Fixed bug in the FileBlockCache wrt growing to accomodate
+    Added support for DELETE lines in .tsv files
+    Added check for DFSBROKER_BAD_FILENAME on skip_not_found
+    Added --metadata-tsv option to metalog_dump
+    Fixed bug whereby get_table_splits() was returning stale results for previously dropped tables.
+    Added MaintenanceScheduler state dump via existence of run/debug-scheduler file
+    Fixed FMR in TableMutator timeout
+
+Version 0.9.5.0.pre5:
+(2011-05-18)
+
+    Changed Group Commit table hash_map to ordered map and fixed memory leak
+    Upgraded Hive jars to CDH3U0 distribution.
+    Added support for Hypertable.RangeServer.CellStore.TargetSize.Minimum
+    Fixed compaction maintenance staging skip for non-minor compactions
+    Fixed split-merge-loop10 and ac-garbage-compaction tests
+    Set NO_LOG_SYNC in HqlInterpreter unconditionally for LOAD DATA INFILE
+    Cleaned up MapReduce job conf properties and Fixed ROW interval spec
+    Auto-increase block cache size to accomodate query load
+    issue 618: Fixed NULL pointer dereference in AccessGroup::run_compaction
+    Added Hypertable.RangeServer.BlockCache.MaxMemory config property
+    Strip base filename from scan files in METADATA Files column
+    Upgraded apache_log and freebase examples to use post namespace API.
+    Fixed inconsistency in timestamp parsing between LDI and Hql shell insert command.
+    Andy's EnsureUnused patch (disabled by default)
+    Fixed FindRRDtool.cmake to work on mac
+
+Version 0.9.5.0.pre4:
+(2011-05-01)
+
+    [Issue 617] Fixed Superfluous RangeServer::create_scanner() request when scanning over exact range
+    Removed benchmark tasks from Capfiles, added Capfile.benchmark
+    Added support for ScanSpec in Hadoop streaming mapred
+    Added hostname to AsyncComm proxy map
+    issue 528: Allow embedded semicolons in HQL string constants
+    Added optional support for jemalloc
+    Fixed bug in scanner which causes assert when a scanner hits row limit and receives results from a cancelled scanner
+    Missed checkin of auto-generated java code
+    Fixed CellStore GC regression; Added test
+    API Change: Made Table objects auto-refresh schema by default
+    Added more info to RS_METRICS (including disk_bytes_read)
+    Support for optionally including master location hash into RangeServer proxies
+    Added support for IP addresses to be used as Hyperspace.Replication.Host strings.
+    Added is_ipv4() method to InetAddr to test if a string is an ip addr in the n.n.n.n format.
+    Fixed MergeScanner bug which failed to use MAX_VERSIONS filter correctly when value regex was used.
+    Added '\0' escaping/unescaping to SELECT, DUMP TABLE, LOAD DATA INFILE
+    Removed trailing slash on exclude hyperspace in Capfile rsync commands
+    Added Hyperspace.Client.Datagram.SendPort property (default=0)
+    Fixed bug in scanner timeout logic. Timers were not being reset correctly in between calls.
+    Removing dependency on BerkeleyDb libraries in Hyperspace client library.
+    Fixed Capfile install/upgrade tasks to work with standalone installs
+    Fix for rounding error in LOAD DATA INFILE timestamp parsing
+    Fix for KEYS_ONLY scan
+    Fixed bug in MergeScanner logic.
+
+Version 0.9.5.0.pre3:
+(2011-04-12)
+
+    Modified stop-servers.sh to stop master and rangeserver iff client progs exist
+    Upgraded to CDH3u0
+    Fix for recent ensure unused physical memory patch
+
+Version 0.9.5.0.pre2:
+(2011-04-11)
+
+    Ensure amount of unused physical memory for RangeServer
+    Fixed scanner deadlock when RangeServer dies or throws exception in create_scanner request.
+    Fixed ThriftBroker timeout problem; Removed default value for ThriftBroker.Timeout
+    Added --nomd5 option to rpm command
+    Got rid of role for install tasks in Capfiles
+    Fixed bug which causes assert when error message length > int16_t limit.
+    More Capfile changes.
+    Changes to Capfile. Replaced "dist" task with "install" and modified "upgrade".
+    Lazily create RangeLocator in RangeServer
+    Fix for recent changes to ApplicationQueue
+    Fixed bugs in TimeInline parse_ts function; Added regression test
+    Fixed problem with recent changes to ApplicationQueue
+    Put shell into "batch mode" when commands supplied with --execute
+    Set default RangeServer work thread count back down to 50
+    Modified ApplicationQueue to create thread on urgent task if all busy
+    Added server-side timeout during initialization; Increased worker threads
+    Fixed RSML upgrade logic
+    Fixed problem with SystemInfo::DiskUsage computation
+    Issue 598:  Common-properties and Common-init tests failing on some platforms. Fixed.
+    Fixed shutdown problem with TableMutatorIntervalHandler
+    Fixed Range load_acknowledged problem when upgrading from pre-0.9.5
+    Fixed release string verification regex; Added print functions for MaintenanceData
+    Fixed hang problem with serverup dfsbroker
+    Fixed some bugs with recent monitoring changes
+    Fixed RangeServer freeze during initialization with low memory condition
+    Fixed typos in VersionHelper.cmake
+    Fixed MasterClient-TransparentFailover test
+    Fixed some issues with monitoring graphs
+    Fixed bug in Future class.
+    Use existing app queue for metadata/metrics table
+    Added "Range Count" to range server monitoring table
+    Fixed low memory freeze problem
+    Stopped Master GC from adding unnecessary deletes into METADATA table
+    Made RangeServer print error and exit on listen error
+    Fixed bug in ScanCells interface whereby it was possibly to dereference a null pointer.
+    Fixed monitoring bug, changed installation dir from "0.9.4.3" to "current"
+    Fixed problem resulting from lost load acknowledge response
+    Fixed bug in future_abrupt_end_test.
+    Fixed Master DispatchHandler outstanding tracking
+    Fixed deadlock in scanners.
+    Fixed bug in scanner logic.
+    issue 585: Copy new METADATA.xml and RS_METRICS.xml in fhsize.sh
+    if on startup MML is empty and /sys/METADATA exists, don't try to create it
+    Fixed shutdown order sequence
+    Fixed RangeServerConnection state persistence problem
+    Updated CHANGES file for 0.9.5.0.pre release
+    Fixed scanner bug where once a scan was cancelled scanners were being set current out of order.
+
+Version 0.9.5.0.pre:
+(2011-03-24)
+
+    Master overhaul
+    MetaLog overhaul
+    Asynchronous Scanner API
+    Upgraded to Thrift 0.6.0
+    Upgraded to CDH3B4
+    Added sys/RS_METRICS
+    Fixed bug in monitoring system that was calculating buggy Cell and Byte read/write rates.
+    Added METADATA-split master failover tests
+    Added MasterClient-TransparentFailover test; fix bugs that turned up
+    Added VERSION_MISC_SUFFIX to version string for 0.9.5.0.pre release.
+    Added delete_count to CellStoreV5Trailer which stores the number of delete records in the CS.
+    Added list of replaced files to CellStoreV5.
+    Fixed soft_limit regression
+    Fixed intermittent test failues due to exit(); Got rid of valgrind warnings
+    Added two-phase master requests
+    Fixed warnings
+    Upgraded version number to 0.9.5.0
+    Cleaned up prune threshold limits; Got rid of warnings
+    Fixed deadlock in ResponseManager
+    Fixed data loss bug - made CommitLog close synchronous; fixed async scanner bug
+    [Issue 579]  metalog backup verification causing intermittent test failures. Fixed
+    Added regression tests for stopping synchronous and asynchronous scanners abruptly before scan completes.
+    Fixed deadlock in TableScannerAsync code.
+    Added needs_compaction flag to RangeServer::load_range method.
+    [Issue 578]  Deadlock in async scanner. Fixed
+    Added ht_master_client shell program with shutdown command
+    Fixed hyperspace-reconnect test
+    Fixed monitoring server initialization problem
+    Minor fix to dot jpg file generation.
+    added start_time,end_time as http query params
+    Close cell store file before removing directory
+    Create <data dir>/run folder if required
+    Fixed a bunch of minor issues.
+    [Issue 577]  RangeServer::commit_log_sync should respect group commit. Fixed
+    Added regression tests and bug fixes for Future API.
+    Performance and functional bug fixes to TableScanner class.
+    Implemented changes to C++ and Thrift clients to support asynchronous scanners. -TODO: add tests for Php and Python 
+    Fixed a bug that was causing the METADATA-split-recovery test to fail intermittently.
+    issue 552: Ensure Hyperspace handles get closed; Naming cleanup
+    Fixed incorrect CellStoreTrailerV5 version check caught by assert
+    Added CellStoreV5; Monitoring system improvements (avg. key & value size)
+    added new column to table stats
+    Added file_count to StatsTable; Fixed compression ratio computation
+    Got rid of read_ids flag in Schema parse API
+    "changes to header labels"
+    Monitoring UI Changes, Sorting options for stats summary
+    Updated clean-database.sh script to reflect new rsml backup location
+    added invalidate methods for table name changes
+    bunch of changes to Monitoring UI changes (reading from json and got rid google graphs which gives summary) Added Ta
+    Fixes to monitoring & stats gathering
+    Fixed bugs caught by Andy Thalmann (ScanContext copy ctor bug)
+    added table names to json , removing unnecessary code
+    Fixed minor monitoring/stats gathering bugs
+    issue 563: fixed METADATA split test
+    bunch of changes to Monitoring UI changes (reading from json and got rid google graphs which gives summary) Added Ta
+    Added Hypertable.RangeServer.CellStore.SkipNotFound
+    issue 559: Prevent transfer log from getting linked in twice
+    issue 552: Ensure Hyperspace handles get closed; Naming cleanup
+    [Issue 505] Client-no-log-sync regression failure
+    issue 537: Fixed RangeServer shutdown hang
+    issue 542: Only write last-dfs file if it doesn't exist
+    issue 544: Set default RangeServer memory limit to 50%
+    issue 553: Schema HQL render wrap table name in quotes if necessary
+    issue 545: Reduced random-write-read test to 1/5 the size
+    [Issue 551] Upgraded to QuickLZ 1.5
+    Fixed bugs related to MasterGc and live file tracking
+    Renamed MoveStart and MoveDone RSML operations to RelinquishStart and RelinquishDone.
+    Made changes to BalanceStarted/Done and RangeMoveLoaded/Acknowledged MML entries.
+    Added code for additional MML entries.
+    Changed MasterMetaLog to garbage collect entries during recovery.
+    Added MoveStart and MoveDone RSML entries.
+    Changed RangeServerMetaLog to garbage collect entries during recovery.
+    Fixed rare bug that caused root range corruption
+    issue 547: Found and fixed more race conditions
+    Fixed excessive maintenance scheduling during low memory condition
+    Fixed deadlocks uncovered recently
+    Fixed race cond in drop_table; Fixed RangeServer::update bug
+    Changed DfsBroker.Local.DirectIO default to false
+    Fixed some stats gathering issues discovered in sys/RS_METRICS
+    issue 531: Fixed bug in load_generator that caused intermittent drop of last cells
+    Added RangeServer::relinquish_range() (with RSML update code stubbed out)
+    Added Hyperspace::Session::open() method with no callback; code cleanup
+    Use "scanned" cells/bytes for load metrics; Added paging info to load metrics
+    Fixed recently introduced "bad ProxyName" problem
+    Do not reduce the limit below the minimum
+    Scan and filter rows fix and optimization
+    Config property "Hypertable.RangeServer.LowMemoryLimit.Percentage" has been added
+    Added disk_used, disk_estimate, and compression_ratio to StatsTable
+    Fixed revision number problem in CommitLogReader with link entries
+    Renamed Master::report_split() to Master::move_range()
+    Added MML
+    Fixed monitoring stats; fixed JSON output for RS summary
+    Monitoring overhaul part 1
+    new rangeserver stats
+    changes to use new rangeserver summary data
+    Destroy comm has been fixed
+    HQL scan and filter rows option added
+    Logic changed to setup row intervals in case of scan and filter rows
+    Optimization for scan and filter rows
+    Scan and filter rows has been implemented (Issue 525)
+    check for negative resolution
+    issues with config
+    Added resolution param to rrd page
+    Fixed monitoring stats; fixed JSON output for RS summary
+    Monitoring overhaul part 1
+    Check for zero-lengthed row and skip in LoadDataSource
+    Allow NULL strings to be passed into FlyweightString
+    Fixed bad memory reference in RangeServer::FillScanBlock
+    cleanup has been added
+    Added prepend_md5 tool
+    Redirect thrift output to HT logger
+    Assignment operator added
+    Support empty qualifier filtering
+    Recursive option added to the hyperspace readdirattr command
+    Recursivly option added to the hyperspace readdirattr command
+    Include sub entries for get_listing/NamespaceListing, readdir_attr/DirEntryAttr
+    Fixed syntax error recently intoduced into Ceph broker code
+    Added StrictHostKeyChecking=no to rsync
+    Added regexp filtering to DUMP TABLE command.
+    Added optimization for row and qualifier regex matching.
+    Added script to compare test runs times and detect potential performance regressions.
+    Cleaned up SELECT [CELLS] Hql command.
+    Removed DfsBroker.Host from default hypertable.cfg; Cleaned up DFS Port properties
+    Fixed bug in Hyperspace caused by Reactor thread directly calling BerkeleyDbFilesystem on disconnect.
+    Improved Master handling of already assigned location in register_server
+    Fixed performance regression in ScanContext by using set instead of hash_set for exact qualifiers
+
+
 Version 0.9.4.3:
 (2010-11-15)
 

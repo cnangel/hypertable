@@ -1,11 +1,11 @@
 /** -*- C++ -*-
- * Copyright (C) 2008 Luke Lu (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -30,6 +30,8 @@ namespace Hypertable { namespace Config {
   void init_thrift_client_options();
   void init_thrift_client();
   void init_thrift_broker_options();
+  void init_thrift_broker();
+  void redirect_thrift_output();
 
   struct ThriftClientPolicy : Policy {
     static void init_options() { init_thrift_client_options(); }
@@ -41,7 +43,7 @@ namespace Hypertable { namespace Config {
    */
   struct ThriftBrokerPolicy : Policy {
     static void init_options() { init_thrift_broker_options(); }
-    static void init() { init_generic_server(); }
+    static void init() { init_thrift_broker(); }
   };
 
 }} // namespace Hypertable::Config

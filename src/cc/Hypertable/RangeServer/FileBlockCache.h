@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -68,12 +68,20 @@ namespace Hypertable {
     }
 
     /**
-     * Sets limit to memory currently used
+     * Sets limit to memory currently used, it will not reduce the limit
+     * below min_memory
      */
     void cap_memory_use() {
       ScopedLock lock(m_mutex);
-      m_limit -= m_available;
-      m_available = 0;
+      int64_t memory_used = m_limit - m_available;
+      if (memory_used > m_min_memory) {
+        m_limit -= m_available;
+        m_available = 0;
+      }
+      else {
+        m_limit = m_min_memory;
+        m_available = m_limit - memory_used;
+      }
     }
 
     int64_t memory_used() {
@@ -89,8 +97,8 @@ namespace Hypertable {
     static int get_next_file_id() {
       return atomic_inc_return(&ms_next_file_id);
     }
-    void get_stats(uint64_t &max_memory, uint64_t &available_memory,
-                   uint64_t &accesses, uint64_t &hits);
+    void get_stats(uint64_t *max_memoryp, uint64_t *available_memoryp,
+                   uint64_t *accessesp, uint64_t *hitsp);
   private:
 
     int64_t make_room(int64_t amount);

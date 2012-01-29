@@ -1,3 +1,21 @@
+# Copyright (C) 2007-2012 Hypertable, Inc.
+#
+# This file is part of Hypertable.
+#
+# Hypertable is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 3
+# of the License, or any later version.
+#
+# Hypertable is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with Hypertable. If not, see <http://www.gnu.org/licenses/>
+#
+
 # -*- cmake -*-
 
 # - Find BerkeleyDB
@@ -11,6 +29,7 @@
 
 find_path(BDB_INCLUDE_DIR db_cxx.h NO_DEFAULT_PATH PATHS
     ${HT_DEPENDENCY_INCLUDE_DIR}
+    /usr/local/BerkeleyDB.5.2/include
     /usr/local/BerkeleyDB.4.8/include
     /usr/local/include/db48
     /opt/local/include/db48
@@ -22,8 +41,10 @@ find_path(BDB_INCLUDE_DIR db_cxx.h NO_DEFAULT_PATH PATHS
 set(BDB_NAMES ${BDB_NAMES} db_cxx)
 find_library(BDB_LIBRARY NAMES ${BDB_NAMES} NO_DEFAULT_PATH PATHS
     ${HT_DEPENDENCY_LIB_DIR}
+    /usr/local/BerkeleyDB.5.2/lib
     /usr/local/BerkeleyDB.4.8/lib
     /usr/local/lib/db48
+    /usr/lib/i386-linux-gnu
     /opt/local/lib/db48
     /usr/local/lib
     /usr/lib

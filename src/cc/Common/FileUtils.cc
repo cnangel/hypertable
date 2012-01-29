@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -30,6 +30,8 @@ extern "C" {
 #include <errno.h>
 #include <pwd.h>
 #include <fcntl.h>
+#include <string.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/uio.h>
@@ -46,6 +48,9 @@ extern "C" {
 }
 
 #include <boost/shared_array.hpp>
+#include <boost/shared_ptr.hpp>
+
+#include <re2/re2.h>
 
 #include "FileUtils.h"
 #include "Logger.h"
@@ -335,6 +340,37 @@ char *FileUtils::file_to_buffer(const String &fname, off_t *lenp) {
   return rbuf;
 }
 
+String FileUtils::file_to_string(const String &fname) {
+  String str;
+  off_t len;
+  char *contents = file_to_buffer(fname, &len);
+  str = (contents == 0) ? "" : contents;
+  delete [] contents;
+  return str;
+}
+
+
+
+void *FileUtils::mmap(const String &fname, off_t *lenp) {
+  int fd;
+  struct stat statbuf;
+  void *map;
+
+  if (::stat(fname.c_str(), &statbuf) != 0)
+    HT_FATALF("Unable determine length of '%s' for memory mapping - %s", fname.c_str(), strerror(errno));
+  *lenp = (off_t)statbuf.st_size;
+
+  if ((fd = ::open(fname.c_str(), O_RDONLY)) == -1)
+    HT_FATALF("Unable to open '%s' for memory mapping - %s", fname.c_str(), strerror(errno));
+  
+  if ((map = ::mmap(0, *lenp, PROT_READ, MAP_SHARED, fd, 0)) == MAP_FAILED)
+    HT_FATALF("Unable to memory map file '%s' - %s", fname.c_str(), strerror(errno));
+
+  close(fd);
+
+  return map;
+}
+
 
 
 bool FileUtils::mkdirs(const String &dirname) {
@@ -408,6 +444,17 @@ bool FileUtils::unlink(const String &fname) {
   return true;
 }
 
+bool FileUtils::rename(const String &oldpath, const String &newpath) {
+  if (::rename(oldpath.c_str(), newpath.c_str()) == -1) {
+    int saved_errno = errno;
+    HT_ERRORF("rename(\"%s\", \"%s\") failed - %s",
+              oldpath.c_str(), newpath.c_str(), strerror(saved_errno));
+    errno = saved_errno;
+    return false;
+  }
+  return true;
+}
+
 uint64_t FileUtils::size(const String &fname) {
   struct stat statbuf;
   if (stat(fname.c_str(), &statbuf) != 0)
@@ -463,6 +510,29 @@ bool FileUtils::expand_tilde(String &fname) {
   }
 
   return true;
+}
+
+using namespace re2;
+
+void FileUtils::readdir(const String &dirname, const String &fname_regex,
+			std::vector<struct dirent> &listing) {
+  int ret;
+  DIR *dirp = opendir(dirname.c_str());
+  struct dirent de, *dep;
+  boost::shared_ptr<RE2> regex(fname_regex.length() ? new RE2(fname_regex) : 0);
+
+  do {
+
+    if ((ret = readdir_r(dirp, &de, &dep)) != 0)
+      HT_FATALF("Problem reading directory '%s' - %s", dirname.c_str(), strerror(errno));
+
+    if (dep != 0 &&
+	(!regex || RE2::FullMatch(de.d_name, *regex)))
+      listing.push_back(de);
+
+  } while (dep != 0);
+
+  (void)closedir(dirp);
 }
 
 

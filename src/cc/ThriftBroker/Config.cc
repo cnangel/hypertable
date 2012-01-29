@@ -1,11 +1,11 @@
 /** -*- C++ -*-
- * Copyright (C) 2008 Luke Lu (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -22,6 +22,7 @@
 #include "Common/Compat.h"
 #include "Common/InetAddr.h"
 #include "Config.h"
+#include "Thrift.h"
 
 namespace Hypertable { namespace Config {
 
@@ -29,7 +30,7 @@ void init_thrift_client_options() {
   cmdline_desc().add_options()
     ("thrift-broker", str()->default_value("localhost:38080"),
         "Thrift client endpoint in <host:port> format")
-    ("thrift-timeout", i32()->default_value(20000),
+    ("thrift-timeout", i32(),
         "Timeout in milli-seconds for thrift client connections")
     ;
   alias("thrift-timeout", "ThriftBroker.Timeout");
@@ -43,6 +44,8 @@ void init_thrift_client() {
   bool defaulted = properties->defaulted("thrift-broker");
   properties->set("thrift-host", e.host, defaulted);
   properties->set("thrift-port", e.port, !e.port || defaulted);
+  // redirect thrift output
+  redirect_thrift_output();
 }
 
 void init_thrift_broker_options() {
@@ -57,6 +60,24 @@ void init_thrift_broker_options() {
   alias("workers", "ThriftBroker.Workers");
   // hidden aliases
   alias("thrift-timeout", "ThriftBroker.Timeout");
+}
+
+void init_thrift_broker() {
+  init_generic_server();
+  // redirect thrift output
+  redirect_thrift_output();
+}
+
+static void thrift_output_handler(const char *message) {
+  if (message) {
+    #if !defined(HT_DISABLE_LOG_ALL) && !defined(HT_DISABLE_LOG_ERROR)
+    if (Logger::logger->isErrorEnabled()) Logger::logger->log(log4cpp::Priority::ERROR, message);
+    #endif
+  }
+}
+
+void redirect_thrift_output() {
+  apache::thrift::GlobalOutput.setOutputFunction(thrift_output_handler);
 }
 
 }} // namespace Hypertable::Config

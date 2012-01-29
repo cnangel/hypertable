@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -43,6 +43,8 @@
 #include "AccessGroupGarbageTracker.h"
 #include "CellCache.h"
 #include "CellStore.h"
+#include "CellStoreTrailerV5.h"
+#include "CellStoreInfo.h"
 #include "LiveFileTracker.h"
 #include "MaintenanceFlag.h"
 
@@ -76,9 +78,14 @@ namespace Hypertable {
       int64_t mem_used;
       int64_t mem_allocated;
       int64_t cached_items;
+      uint64_t cell_count;
       int64_t immutable_items;
       int64_t disk_used;
+      int64_t disk_estimate;
       int64_t log_space_pinned;
+      int64_t key_bytes;
+      int64_t value_bytes;
+      uint32_t file_count;
       int32_t deletes;
       int32_t outstanding_scanners;
       float    compression_ratio;
@@ -91,55 +98,12 @@ namespace Hypertable {
       uint64_t shadow_cache_memory;
       bool     in_memory;
       bool     gc_needed;
-    };
-
-    class CellStoreInfo {
-    public:
-      CellStoreInfo(CellStore *csp) :
-	cs(csp), shadow_cache_ecr(TIMESTAMP_MAX), shadow_cache_hits(0), bloom_filter_accesses(0),
- bloom_filter_maybes(0), bloom_filter_fps(0) {
-        init_from_trailer();
-      }
-      CellStoreInfo(CellStorePtr &csp) :
-	cs(csp), shadow_cache_ecr(TIMESTAMP_MAX), shadow_cache_hits(0), bloom_filter_accesses(0),
- bloom_filter_maybes(0), bloom_filter_fps(0) {
-        init_from_trailer();
-      }
-      CellStoreInfo(CellStorePtr &csp, CellCachePtr &scp, int64_t ecr) :
-	cs(csp), shadow_cache(scp), shadow_cache_ecr(ecr), shadow_cache_hits(0),
- bloom_filter_accesses(0), bloom_filter_maybes(0), bloom_filter_fps(0)  {
-        init_from_trailer();
-      }
-      CellStoreInfo() : shadow_cache_ecr(TIMESTAMP_MAX), shadow_cache_hits(0),
-      bloom_filter_accesses(0), bloom_filter_maybes(0), bloom_filter_fps(0) { }
-      void init_from_trailer() {
-        try {
-          timestamp_min = boost::any_cast<int64_t>(cs->get_trailer()->get("timestamp_min"));
-          timestamp_max = boost::any_cast<int64_t>(cs->get_trailer()->get("timestamp_max"));
-          expirable_data = boost::any_cast<int64_t>(cs->get_trailer()->get("expirable_data"));
-        }
-        catch (std::exception &e) {
-          timestamp_min = TIMESTAMP_MAX;
-          timestamp_max = TIMESTAMP_MIN;
-          expirable_data = 0;
-        }
-      }
-      CellStorePtr cs;
-      CellCachePtr shadow_cache;
-      int64_t shadow_cache_ecr;
-      uint32_t shadow_cache_hits;
-      uint32_t bloom_filter_accesses;
-      uint32_t bloom_filter_maybes;
-      uint32_t bloom_filter_fps;
-      int64_t timestamp_min;
-      int64_t timestamp_max;
-      int64_t expirable_data;
-      int64_t total_data;
+      bool     needs_merging;
     };
 
     AccessGroup(const TableIdentifier *identifier, SchemaPtr &schema,
                 Schema::AccessGroup *ag, const RangeSpec *range);
-    virtual ~AccessGroup();
+
     virtual void add(const Key &key, const ByteString value);
 
     virtual const char *get_split_row();
@@ -149,7 +113,7 @@ namespace Hypertable {
 
     virtual int64_t get_total_entries() {
       boost::mutex::scoped_lock lock(m_mutex);
-      int64_t total = m_cell_cache->get_total_entries();
+      int64_t total = m_cell_cache ? m_cell_cache->get_total_entries() : 0;
       if (m_immutable_cache)
         total += m_immutable_cache->get_total_entries();
       if (!m_in_memory) {
@@ -161,8 +125,18 @@ namespace Hypertable {
 
     void update_schema(SchemaPtr &schema_ptr, Schema::AccessGroup *ag);
 
-    void lock() { m_mutex.lock(); m_cell_cache->lock(); }
-    void unlock() { m_cell_cache->unlock(); m_mutex.unlock(); }
+    void lock() {
+      m_mutex.lock();
+      if (!m_cell_cache)
+        m_cell_cache = new CellCache();
+      m_cell_cache->lock();
+    }
+
+    void unlock() {
+      if (m_cell_cache)
+        m_cell_cache->unlock();
+      m_mutex.unlock();
+    }
 
     CellListScanner *create_scanner(ScanContextPtr &scan_ctx);
 
@@ -170,9 +144,9 @@ namespace Hypertable {
     uint64_t disk_usage();
     uint64_t memory_usage();
     void space_usage(int64_t *memp, int64_t *diskp);
-    void add_cell_store(CellStorePtr &cellstore, uint32_t id);
+    void add_cell_store(CellStorePtr &cellstore);
 
-    void compute_garbage_stats(int64_t *input_bytesp, int64_t *output_bytesp);
+    void compute_garbage_stats(uint64_t *input_bytesp, uint64_t *output_bytesp);
 
     void run_compaction(int maintenance_flags);
 
@@ -192,30 +166,44 @@ namespace Hypertable {
 
     uint64_t get_collision_count() {
       ScopedLock lock(m_mutex);
-      return m_collisions + m_cell_cache->get_collision_count();
+      return m_collisions + (m_cell_cache ? m_cell_cache->get_collision_count() : 0);
     }
 
     uint64_t get_cached_count() {
       ScopedLock lock(m_mutex);
-      return m_cell_cache->size();
+      return m_cell_cache ? m_cell_cache->size() : 0;
     }
 
-    void drop() { m_drop = true; }
-
-    void get_file_list(String &file_list, bool include_blocked) {
-      m_file_tracker.get_file_list(file_list, include_blocked);
+    void get_file_data(String &file_list, int64_t *block_countp, bool include_blocked) {
+      m_file_tracker.get_file_data(file_list, block_countp, include_blocked);
     }
 
     void release_files(const std::vector<String> &files);
 
     void recovery_initialize() { m_recovering = true; }
-    void recovery_finalize() { m_recovering = false; }
+    void recovery_finalize() {
+      sort_cellstores_by_timestamp();
+      m_needs_merging = find_merge_run();
+      m_recovering = false;
+    }
 
     void dump_keys(std::ofstream &out);
 
+    void set_next_csid(uint32_t nid) {
+      if (nid > m_next_cs_id) {
+        m_next_cs_id = nid;
+        m_file_tracker.set_next_csid(nid);
+      }
+    }
+
   private:
-    String strip_file_basename(const String &fname);
-    void merge_caches();
+
+    void merge_caches(bool reset_earliest_cached_revision=true);
+    void range_dir_initialize();
+    void recompute_compression_ratio(int64_t *total_index_entriesp=0);
+    bool find_merge_run(size_t *indexp=0, size_t *lenp=0);
+    bool needs_merging();
+    void sort_cellstores_by_timestamp();
 
     Mutex                m_mutex;
     Mutex                m_outstanding_scanner_mutex;
@@ -226,6 +214,7 @@ namespace Hypertable {
     String               m_name;
     String               m_full_name;
     String               m_table_name;
+    String               m_range_dir;
     String               m_start_row;
     String               m_end_row;
     String               m_range_name;
@@ -243,16 +232,16 @@ namespace Hypertable {
     uint64_t             m_collisions;
     LiveFileTracker      m_file_tracker;
     AccessGroupGarbageTracker m_garbage_tracker;
-    String               m_file_basename;
     bool                 m_is_root;
     bool                 m_in_memory;
-    bool                 m_drop;
     bool                 m_recovering;
     bool                 m_bloom_filter_disabled;
+    bool                 m_needs_merging;
 
   };
   typedef boost::intrusive_ptr<AccessGroup> AccessGroupPtr;
 
+  std::ostream &operator<<(std::ostream &os, const AccessGroup::MaintenanceData &mdata);
 
 } // namespace Hypertable
 

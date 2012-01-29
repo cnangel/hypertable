@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -37,6 +37,8 @@ namespace Hyperspace {
    * Structure to hold extended attribute and value
    */
   struct Attribute {
+    Attribute() { }
+  Attribute(const char *n, const void *v, uint32_t vl) : name(n), value(v), value_len(vl) { }
     /** name of extended attribute */
     const char *name;
     /** pointer to attribute value */
@@ -62,24 +64,32 @@ namespace Hyperspace {
     static CommBuf *create_handshake_request(uint64_t session_id, const std::string &name);
     static CommBuf *
     create_open_request(const std::string &name, uint32_t flags,
-        HandleCallbackPtr &callback, std::vector<Attribute> &init_attrs);
+        HandleCallbackPtr &callback, const std::vector<Attribute> &init_attrs);
     static CommBuf *create_close_request(uint64_t handle);
-    static CommBuf *create_mkdir_request(const std::string &name);
+    static CommBuf *create_mkdir_request(const std::string &name, bool create_intermediate, const std::vector<Attribute> *init_attrs);
     static CommBuf *create_delete_request(const std::string &name);
     static CommBuf *
-    create_attr_set_request(uint64_t handle, const std::string &name,
-                            const void *value, size_t value_len);
+    create_attr_set_request(uint64_t handle, const std::string *name, uint32_t oflags,
+                            const std::string &attr, const void *value, size_t value_len);
     static CommBuf *
-    create_attr_incr_request(uint64_t handle, const std::string &name);
+    create_attr_set_request(uint64_t handle, const std::string *name, uint32_t oflags,
+                            const std::vector<Attribute> &attrs);
     static CommBuf *
-    create_attr_get_request(uint64_t handle, const std::string &name);
+    create_attr_incr_request(uint64_t handle, const std::string *name, const std::string &attr);
+    static CommBuf *
+    create_attr_get_request(uint64_t handle, const std::string *name, const std::string &attr);
+    static CommBuf *
+    create_attrs_get_request(uint64_t handle, const std::string *name, const std::vector<std::string> &attrs);
     static CommBuf *
     create_attr_del_request(uint64_t handle, const std::string &name);
-    static CommBuf *create_attr_exists_request(uint64_t handle, const std::string &name);
+    static CommBuf *create_attr_exists_request(uint64_t handle, const std::string *name,
+                                               const std::string &attr);
     static CommBuf *create_attr_list_request(uint64_t handle);
     static CommBuf *create_readdir_request(uint64_t handle);
-    static CommBuf *create_readdir_attr_request(uint64_t handle, const std::string &name);
-    static CommBuf *create_readpath_attr_request(uint64_t handle, const std::string &name);
+    static CommBuf *create_readdir_attr_request(uint64_t handle, const std::string *name,
+                                                const std::string &attr, bool include_sub_entries);
+    static CommBuf *create_readpath_attr_request(uint64_t handle, const std::string *name,
+                                                 const std::string &attr);
     static CommBuf *create_exists_request(const std::string &name);
 
     static CommBuf *

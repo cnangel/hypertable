@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 HT_HOME=${INSTALL_DIR:-"$HOME/hypertable/current"}
+HYPERTABLE_HOME=$HT_HOME
 PIDFILE=$HT_HOME/run/Hypertable.RangeServer.pid
 LAUNCHER_PIDFILE=$HT_HOME/run/Hypertable.RangeServerLauncher.pid
 DUMP_METALOG=$HT_HOME/bin/dump_metalog
@@ -22,14 +23,10 @@ if [ -f $PIDFILE ]; then
   rm -f $PIDFILE
 fi
 
-# Dumping cores slows things down unnecessarily for normal test runs
-ulimit -c 0
-
 $HT_HOME/bin/ht Hypertable.RangeServer --verbose --pidfile=$PIDFILE \
-    --Hypertable.Mutator.ScatterBuffer.FlushLimit.PerServer=11K \
     --Hypertable.RangeServer.Range.SplitSize=25K \
     --Hypertable.RangeServer.CellStore.DefaultBlockSize=1K \
-    --Hypertable.RangeServer.Range.MetadataSplitSize=3K \
+    --Hypertable.RangeServer.Range.MetadataSplitSize=10K \
     --Hypertable.RangeServer.MaintenanceThreads=8 \
     --Hypertable.RangeServer.Maintenance.Interval=100 $@
 
@@ -39,6 +36,8 @@ echo ""
 echo "!!!! CRASH ($@) !!!!"
 echo ""
 
-ulimit -c unlimited
-
-$HT_HOME/bin/ht Hypertable.RangeServer --pidfile=$PIDFILE --verbose
+$HT_HOME/bin/ht Hypertable.RangeServer --pidfile=$PIDFILE --verbose \
+    --Hypertable.RangeServer.Range.SplitSize=25K \
+    --Hypertable.RangeServer.CellStore.DefaultBlockSize=1K \
+    --Hypertable.RangeServer.Range.MetadataSplitSize=10K \
+    --Hypertable.RangeServer.Maintenance.Interval=100

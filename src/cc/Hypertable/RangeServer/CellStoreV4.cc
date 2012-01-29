@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2010 Doug Judd (Hypertable, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -100,6 +100,10 @@ KeyDecompressor *CellStoreV4::create_key_decompressor() {
 const char *CellStoreV4::get_split_row() {
   if (m_split_row != "")
     return m_split_row.c_str();
+  if (m_index_stats.block_index_memory == 0)
+    load_block_index();
+  if (m_split_row != "")
+    return m_split_row.c_str();
   return 0;
 }
 
@@ -113,14 +117,14 @@ CellListScanner *CellStoreV4::create_scanner(ScanContextPtr &scan_ctx) {
   }
 
   if (m_64bit_index)
-    return new CellStoreScanner<CellStoreBlockIndexMap<int64_t> >(this, scan_ctx, need_index ? &m_index_map64 : 0);
-  return new CellStoreScanner<CellStoreBlockIndexMap<uint32_t> >(this, scan_ctx, need_index ? &m_index_map32 : 0);
+    return new CellStoreScanner<CellStoreBlockIndexArray<int64_t> >(this, scan_ctx, need_index ? &m_index_map64 : 0);
+  return new CellStoreScanner<CellStoreBlockIndexArray<uint32_t> >(this, scan_ctx, need_index ? &m_index_map32 : 0);
 }
 
 
 void
 CellStoreV4::create(const char *fname, size_t max_entries,
-                    PropertiesPtr &props) {
+                    PropertiesPtr &props, const TableIdentifier *table_id) {
   int32_t replication = props->get_i32("replication", int32_t(-1));
   int64_t blocksize = props->get("blocksize", uint32_t(0));
   String compressor = props->get("compressor", String());
@@ -270,7 +274,7 @@ void CellStoreV4::load_bloom_filter() {
   }
 
   if (m_bloom_filter->total_size() > 0) {
-    len = m_filesys->pread(m_fd, m_bloom_filter->base(), 
+    len = m_filesys->pread(m_fd, m_bloom_filter->base(),
                            m_bloom_filter->total_size(),
                            m_trailer.filter_offset);
 
@@ -278,6 +282,8 @@ void CellStoreV4::load_bloom_filter() {
       HT_THROWF(Error::DFSBROKER_IO_ERROR, "Problem loading bloomfilter for"
                 "CellStore '%s' : tried to read %lld but only got %lld",
                 m_filename.c_str(), (Lld)m_bloom_filter->total_size(), (Lld)len);
+
+    m_bytes_read += len;
 
     m_bloom_filter->validate(m_filename);
   }
@@ -374,7 +380,7 @@ void CellStoreV4::add(const Key &key, const ByteString value) {
   }
 
   m_key_compressor->add(key);
-  
+
   size_t key_len = m_key_compressor->length();
   size_t value_len = value.length();
 
@@ -601,10 +607,12 @@ void CellStoreV4::finalize(TableIdentifier *table_identifier) {
   /** Re-open file for reading **/
   m_fd = m_filesys->open(m_filename, Filesystem::OPEN_FLAG_DIRECTIO);
 
-  m_disk_usage = m_file_length;
-  if (m_disk_usage < 0)
-    HT_WARN_OUT << "[Issue 339] Disk usage for " << m_filename << "=" << m_disk_usage
-                << HT_END;
+  // If compacting due to a split, estimate the disk usage at 1/2
+  if (m_trailer.flags & CellStoreTrailerV4::SPLIT)
+    m_disk_usage = m_file_length / 2;
+  else
+    m_disk_usage = m_file_length;
+
   m_index_stats.block_index_memory = sizeof(CellStoreV4) + index_memory;
 
   if (m_bloom_filter)
@@ -688,6 +696,12 @@ CellStoreV4::open(const String &fname, const String &start_row,
 
   m_trailer = *static_cast<CellStoreTrailerV4 *>(trailer);
 
+  // If compacting due to a split, estimate the disk usage at 1/2
+  if (m_trailer.flags & CellStoreTrailerV4::SPLIT)
+    m_disk_usage = m_file_length / 2;
+  else
+    m_disk_usage = m_file_length;
+
   m_bloom_filter_mode = (BloomFilterMode)m_trailer.bloom_filter_mode;
 
   /** Sanity check trailer **/
@@ -699,8 +713,8 @@ CellStoreV4::open(const String &fname, const String &start_row,
   if (!(m_trailer.fix_index_offset < m_trailer.var_index_offset &&
         m_trailer.var_index_offset < m_file_length))
     HT_THROWF(Error::RANGESERVER_CORRUPT_CELLSTORE,
-              "Bad index offsets in CellStore trailer fix=%lld, var=%lld, "
-              "length=%llu, file='%s'", (Lld)m_trailer.fix_index_offset,
+              "Bad index offsets in CellStore trailer fd=%u fix=%lld, var=%lld, "
+              "length=%llu, file='%s'", (unsigned)m_fd, (Lld)m_trailer.fix_index_offset,
            (Lld)m_trailer.var_index_offset, (Llu)m_file_length, fname.c_str());
 
 }
@@ -740,6 +754,8 @@ void CellStoreV4::load_block_index() {
     buf.ptr += (m_trailer.var_index_offset - m_trailer.fix_index_offset);
     m_compressor->inflate(buf, m_index_builder.fixed_buf(), header);
 
+    m_bytes_read += m_index_builder.fixed_buf().fill();
+
     inflating_fixed = false;
 
     if (!header.check_magic(INDEX_FIXED_BLOCK_MAGIC))
@@ -752,6 +768,8 @@ void CellStoreV4::load_block_index() {
     vbuf.ptr = buf.ptr + amount;
 
     m_compressor->inflate(vbuf, m_index_builder.variable_buf(), header);
+
+    m_bytes_read += m_index_builder.variable_buf().fill();
 
     if (!header.check_magic(INDEX_VARIABLE_BLOCK_MAGIC))
       HT_THROW(Error::BLOCK_COMPRESSOR_BAD_MAGIC, m_filename);
@@ -789,11 +807,6 @@ void CellStoreV4::load_block_index() {
                        m_trailer.fix_index_offset, m_start_row, m_end_row);
     record_split_row( m_index_map32.middle_key() );
   }
-
-  m_disk_usage = m_index_map32.disk_used();
-  if (m_disk_usage < 0)
-    HT_WARN_OUT << "[Issue 339] Disk usage for " << m_filename << "=" << m_disk_usage
-                << HT_END;
 
   m_index_stats.block_index_memory = sizeof(CellStoreV4) + m_index_map32.memory_used();
   Global::memory_tracker->add( m_index_stats.block_index_memory );

@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -34,4 +34,12 @@ const char CellStore::INDEX_VARIABLE_BLOCK_MAGIC[10] =
 
 KeyDecompressor *CellStore::create_key_decompressor() {
   return new KeyDecompressorNone();
+}
+
+void CellStore::set_replaced_files(const std::vector<String> &old_files) {
+  m_replaced_files = old_files;
+}
+
+const std::vector<String> &CellStore::get_replaced_files() {
+  return m_replaced_files;
 }

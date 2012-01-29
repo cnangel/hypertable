@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "AsyncComm/Event.h"
+#include "Common/ReferenceCount.h"
 #include "Common/ByteString.h"
 #include "SerializedKey.h"
 
@@ -35,7 +36,7 @@ namespace Hypertable {
    * and this class parses and provides easy access to the key/value
    * pairs in that result.
    */
-  class ScanBlock {
+  class ScanBlock : public ReferenceCount {
   public:
 
     typedef std::vector< std::pair<SerializedKey, ByteString> > Vector;
@@ -86,20 +87,39 @@ namespace Hypertable {
       return true;
     }
 
+    /**
+     * Approximate estimate of memory used by scanblock (returns the size of the event payload)
+     * which contains most of the data
+     */
+    size_t memory_used() const {
+      if (m_event_ptr)
+        return m_event_ptr->payload_len;
+      return 0;
+    }
+
     /** Returns scanner ID associated with this scanblock.
      *
      * @return scanner ID
      */
     int get_scanner_id() { return m_scanner_id; }
 
+    /** Returns number of skipped rows because of an OFFSET predicate */
+    int get_skipped_rows() { return m_skipped_rows; }
+
+    /** Returns number of skipped rows because of a CELL_OFFSET predicate */
+    int get_skipped_cells() { return m_skipped_cells; }
+
   private:
     int m_error;
     uint16_t m_flags;
     int m_scanner_id;
+    int m_skipped_rows;
+    int m_skipped_cells;
     Vector m_vec;
     Vector::iterator m_iter;
     EventPtr m_event_ptr;
   };
+  typedef intrusive_ptr<ScanBlock> ScanBlockPtr;
 }
 
 #endif // HYPERTABLE_SCANBLOCK_H

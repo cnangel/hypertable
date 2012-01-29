@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2010 Sanjit Jhala (Hypertable, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -37,6 +37,7 @@
 #include "TableCache.h"
 #include "Table.h"
 #include "TableScanner.h"
+#include "TableScannerAsync.h"
 #include "TableSplit.h"
 #include "TableMutator.h"
 #include "NamespaceListing.h"
@@ -173,10 +174,10 @@ namespace Hypertable {
      * Opens a table
      *
      * @param name name of the table
-     * @param force by pass any cache if possible
+     * @param flags open flags
      * @return pointer to Table object
      */
-    TablePtr open_table(const String &name, bool force = false);
+    TablePtr open_table(const String &name, int32_t flags = 0);
 
     /**
      * Refreshes the cached table entry
@@ -221,9 +222,10 @@ namespace Hypertable {
     /**
      * Returns a list of existing tables &  namesspaces
      *
+     * @param include_sub_entries include or not include all sub entries
      * @param tables reference to vector of table names
      */
-    void get_listing(std::vector<NamespaceListing> &listing);
+    void get_listing(bool include_sub_entries, std::vector<NamespaceListing> &listing);
 
     /**
      * Renames a table.
@@ -257,7 +259,7 @@ namespace Hypertable {
     String get_full_name(const String &sub_name);
 
     void initialize();
-    TablePtr _open_table(const String &full_name, bool force=false);
+    TablePtr _open_table(const String &full_name, int32_t flags = 0);
 
     String                  m_name;
     String                  m_id;
@@ -271,7 +273,6 @@ namespace Hypertable {
     RangeLocatorPtr         m_range_locator;
     String                  m_toplevel_dir;
     bool                    m_hyperspace_reconnect;
-    bool                    m_refresh_schema;
     Mutex                   m_mutex;
     TableCachePtr           m_table_cache;
     uint32_t                m_timeout_ms;

@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2007 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -134,12 +134,13 @@ public class Serialization {
         if (buf.remaining() < 3)
             return null;
         short len = buf.getShort();
-        if (len == 0)
+        if (len == 0) {
+	    buf.get(); // skip \0 terminator
             return new String("");
+	}
         byte [] sbytes = new byte [ len ];
         buf.get(sbytes);
-        // skip '\0' terminator
-        buf.get();
+        buf.get();  // skip '\0' terminator
         try {
             return new String(sbytes, "UTF-8");
         }

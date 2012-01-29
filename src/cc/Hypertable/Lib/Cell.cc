@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2008 Luke Lu (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -35,7 +35,19 @@ std::ostream &operator<<(std::ostream &os, const Cell &cell) {
 
   os <<" len="<< cell.value_len
      <<" ts="<< cell.timestamp
-     << " flag="<< cell.flag;
+     <<" flag=";
+  if (cell.flag==FLAG_DELETE_ROW)
+    os << "DELETE_ROW";
+  else if (cell.flag==FLAG_DELETE_COLUMN_FAMILY)
+    os << "DELETE_COLUMN_FAMILY";
+  else if (cell.flag==FLAG_DELETE_CELL)
+    os << "DELETE_CELL";
+  else if (cell.flag == FLAG_DELETE_CELL_VERSION)
+    os << "DELETE_CELL_VERSION";
+  else if (cell.flag==FLAG_INSERT)
+    os << "FLAG_INSERT";
+  else
+    os << cell.flag << " (unrecognized)";
 
   os <<'}';
   return os;

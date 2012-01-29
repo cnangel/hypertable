@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2010 Sanjit Jhala (Hypertable, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -65,22 +65,30 @@ namespace Hypertable {
 
     /**
      * @param id the id of the namespace
+     * @param include_sub_entries include or not include all sub entries
      * @param listing returned names of the table/namespaces contained within the namespace
      *        specified by id
      */
-    void id_to_sublisting(const String &id, std::vector<NamespaceListing> &listing);
+    void id_to_sublisting(const String &id, bool include_sub_entries, std::vector<NamespaceListing> &listing);
 
     /**
      * @param name name to map
      * @param id output parameter to hold newly mapped ID
      * @param flags control falgs (IS_NAMESPACE and/or CREATE_INTERMEDIATE)
      */
-    void add_mapping(const String &name, String &id, int flags=0);
+    void add_mapping(const String &name, String &id, int flags=0, bool ignore_exists=false);
 
     /**
      * @param name name to map
      */
     void drop_mapping(const String &name);
+
+    /**
+     * @param name name to check for mapping
+     * @param is_namespace if mapping exists set to true if is namespace
+     * @return true if mapping exists, false otherwise
+     */
+    bool exists_mapping(const String &name, bool *is_namespace);
 
     /**
      * Rename one entity, it doesn't recursively rename all entities under the path
@@ -91,10 +99,12 @@ namespace Hypertable {
      */
     void rename(const String &old_name, const String &new_name);
 
-    void add_entry(const String &names_parent, const String &names_entry, std::vector<uint64_t> &ids, bool is_namespace);
+    void add_entry(const String &names_parent, const String &names_entry,
+                   std::vector<uint64_t> &ids, bool is_namespace);
 
   protected:
     bool do_mapping(const String &input, bool id_in, String &output, bool *is_namespacep);
+    static void get_namespace_listing(const std::vector<Hyperspace::DirEntryAttr> &dir_listing, std::vector<NamespaceListing> &listing);
 
     Mutex m_mutex;
     Hyperspace::SessionPtr m_hyperspace;

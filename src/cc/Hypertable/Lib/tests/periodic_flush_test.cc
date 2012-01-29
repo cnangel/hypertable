@@ -1,11 +1,11 @@
 /** -*- C++ -*-
- * Copyright (C) 2009  Luke Lu (llu@hypertable.org)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -53,7 +53,7 @@ void default_test(Table *table)  {
 
 void no_log_sync_test(Table *table) {
   TableMutatorPtr mutator = table->create_mutator(0, TableMutator::FLAG_NO_LOG_SYNC, 500);
-  mutator->set_delete(KeySpec("rowkey", "col"));
+  mutator->set_delete(KeySpec("rowkey", "col", AUTO_ASSIGN, FLAG_DELETE_COLUMN_FAMILY));
   mutator->set(KeySpec("rowkey", "col", "cq"), "value");
   sleep(1);
   check_results(table);

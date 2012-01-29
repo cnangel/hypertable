@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -27,6 +27,7 @@
 #include <boost/thread/xtime.hpp>
 
 #include "Logger.h"
+#include "Time.h"
 
 namespace Hypertable {
 
@@ -41,6 +42,17 @@ namespace Hypertable {
         m_duration(millis), m_remaining(millis) {
       if (start_timer)
         start();
+    }
+
+    // Assignment operator copy state but don't start
+    Timer& operator= (Timer &src) {
+      if (&src != this) {
+        m_running = false;
+        m_started = false;
+        m_duration = src.duration();
+        m_remaining = src.remaining();
+      }
+      return *this;
     }
 
     void start() {
@@ -73,6 +85,14 @@ namespace Hypertable {
       m_running = false;
     }
 
+    void reset(bool start_timer=false) {
+      m_running = false;
+      m_started = false;
+      m_remaining = m_duration;
+      if (start_timer)
+        start();
+    }
+
     uint32_t remaining() {
       if (m_running) { stop(); start(); }
       return m_remaining;
@@ -85,9 +105,9 @@ namespace Hypertable {
     uint32_t duration() { return m_duration; }
 
   private:
+    boost::xtime start_time;
     bool m_running;
     bool m_started;
-    boost::xtime start_time;
     uint32_t m_duration;
     uint32_t m_remaining;
   };

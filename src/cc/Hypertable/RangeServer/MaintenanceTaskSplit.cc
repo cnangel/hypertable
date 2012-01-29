@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -28,8 +28,10 @@ using namespace Hypertable;
 /**
  *
  */
-MaintenanceTaskSplit::MaintenanceTaskSplit(boost::xtime &stime, RangePtr &range)
-  : MaintenanceTask(stime, range, String("SPLIT ") + range->get_name()) {
+MaintenanceTaskSplit::MaintenanceTaskSplit(int level, int priority, boost::xtime &stime, RangePtr &range)
+  : MaintenanceTask(level, priority, stime, range, String("SPLIT ") + range->get_name()) {
+  set_retry_delay(5000);
+  set_retry(true);
 }
 
 

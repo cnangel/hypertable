@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -51,6 +51,7 @@ namespace {
  */
 int main(int argc, char **argv) {
   ClientPtr client_ptr;
+  NamespacePtr namespace_ptr;
   TablePtr table_ptr;
   TableScannerPtr scanner_ptr;
   ScanSpecBuilder scan_spec_builder;
@@ -67,8 +68,11 @@ int main(int argc, char **argv) {
     // Create Hypertable client object
     client_ptr = new Client( System::locate_install_dir(argv[0]) );
 
+    // Open the root namespace
+    namespace_ptr = client_ptr->open_namespace("/");
+
     // Open the 'LogDb' table
-    table_ptr = client_ptr->open_table("LogDb");
+    table_ptr = namespace_ptr->open_table("LogDb");
 
     // setup row interval
     end_row = (String)argv[1];

@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2010 Doug Judd (Hypertable, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -73,7 +73,7 @@ public class DriverThreadHypertable extends Thread {
           while (!mState.updates.isEmpty()) {
             try {
               SerializedCellsWriter writer = mState.updates.remove();
-              mClient.set_cells_serialized(mMutator, writer.buffer(), true);
+              mClient.mutator_set_cells_serialized(mMutator, writer.buffer(), true);
             }
             catch (Exception e) {
               e.printStackTrace();

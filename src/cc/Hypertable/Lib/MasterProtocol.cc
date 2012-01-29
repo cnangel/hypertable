@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -21,6 +21,7 @@
 
 #include "Common/Compat.h"
 #include "Common/Serialization.h"
+#include "Common/Time.h"
 
 #include "AsyncComm/CommHeader.h"
 
@@ -94,25 +95,45 @@ namespace Hypertable {
 
   CommBuf *
   MasterProtocol::create_register_server_request(const String &location,
-                                                 const InetAddr &addr) {
+                                                 uint16_t listen_port,
+                                                 StatsSystem &system_stats) {
+    int64_t now = get_ts64();
     CommHeader header(COMMAND_REGISTER_SERVER);
-    CommBuf *cbuf = new CommBuf(header, encoded_length_vstr(location) + 8);
+    CommBuf *cbuf = new CommBuf(header, encoded_length_vstr(location) + 2 + system_stats.encoded_length() + 8);
     cbuf->append_vstr(location);
-    cbuf->append_inet_addr(addr);
+    cbuf->append_i16(listen_port);
+    system_stats.encode(cbuf->get_data_ptr_address());
+    cbuf->append_i64(now);
     return cbuf;
   }
 
   CommBuf *
-  MasterProtocol::create_report_split_request(const TableIdentifier *table,
+  MasterProtocol::create_move_range_request(const TableIdentifier *table,
       const RangeSpec &range, const String &transfer_log_dir,
-      uint64_t soft_limit) {
-    CommHeader header(COMMAND_REPORT_SPLIT);
+      uint64_t soft_limit, bool split) {
+    CommHeader header(COMMAND_MOVE_RANGE);
     CommBuf *cbuf = new CommBuf(header, table->encoded_length()
-        + range.encoded_length() + encoded_length_vstr(transfer_log_dir) + 8);
+        + range.encoded_length() + encoded_length_vstr(transfer_log_dir) + 9);
     table->encode(cbuf->get_data_ptr_address());
     range.encode(cbuf->get_data_ptr_address());
     cbuf->append_vstr(transfer_log_dir);
     cbuf->append_i64(soft_limit);
+    if (split)
+      cbuf->append_byte(1);
+    else
+      cbuf->append_byte(0);
+    return cbuf;
+  }
+
+
+  CommBuf *
+  MasterProtocol::create_relinquish_acknowledge_request(const TableIdentifier *table,
+                                                        const RangeSpec &range) {
+    CommHeader header(COMMAND_RELINQUISH_ACKNOWLEDGE);
+    CommBuf *cbuf = new CommBuf(header, table->encoded_length()
+                                + range.encoded_length());
+    table->encode(cbuf->get_data_ptr_address());
+    range.encode(cbuf->get_data_ptr_address());
     return cbuf;
   }
 
@@ -126,15 +147,23 @@ namespace Hypertable {
     return cbuf;
   }
 
-  CommBuf *MasterProtocol::create_close_request() {
-    CommHeader header(COMMAND_CLOSE);
-    CommBuf *cbuf = new CommBuf(header, 0);
+  CommBuf *MasterProtocol::create_fetch_result_request(int64_t id) {
+    CommHeader header(COMMAND_FETCH_RESULT);
+    CommBuf *cbuf = new CommBuf(header, 8);
+    cbuf->append_i64(id);
     return cbuf;
   }
 
   CommBuf *MasterProtocol::create_shutdown_request() {
     CommHeader header(COMMAND_SHUTDOWN);
     CommBuf *cbuf = new CommBuf(header, 0);
+    return cbuf;
+  }
+
+  CommBuf *MasterProtocol::create_balance_request(BalancePlan &plan) {
+    CommHeader header(COMMAND_BALANCE);
+    CommBuf *cbuf = new CommBuf(header, plan.encoded_length());
+    plan.encode(cbuf->get_data_ptr_address());
     return cbuf;
   }
 
@@ -147,7 +176,13 @@ namespace Hypertable {
     "drop table",
     "alter table",
     "shutdown",
-    "close"
+    "close",
+    "create namespace",
+    "drop namespace",
+    "rename table",
+    "relinquish acknowledge",
+    "fetch result",
+    "balance"
   };
 
   const char *MasterProtocol::command_text(uint64_t command) {

@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -43,7 +43,7 @@ ScanContext::initialize(int64_t rev, const ScanSpec *ss,
   boost::xtime xtnow;
   int64_t now;
   String family, qualifier;
-  bool is_regexp;
+  bool has_qualifier, is_regexp;
 
   boost::xtime_get(&xtnow, boost::TIME_UTC);
   now = ((int64_t)xtnow.sec * 1000000000LL) + (int64_t)xtnow.nsec;
@@ -76,14 +76,14 @@ ScanContext::initialize(int64_t rev, const ScanSpec *ss,
     if (spec && spec->columns.size() > 0) {
 
       foreach(const char *cfstr, spec->columns) {
-        ScanSpec::parse_column(cfstr, family, qualifier, &is_regexp);
+        ScanSpec::parse_column(cfstr, family, qualifier, &has_qualifier, &is_regexp);
         cf = schema->get_column_family(family.c_str());
 
         if (cf == 0)
           HT_THROW(Error::RANGESERVER_INVALID_COLUMNFAMILY, cfstr);
 
         family_mask[cf->id] = true;
-        if (qualifier.length() > 0) {
+        if (has_qualifier) {
           family_info[cf->id].add_qualifier(qualifier.c_str(), is_regexp);
         }
         if (cf->ttl == 0)
@@ -161,20 +161,28 @@ ScanContext::initialize(int64_t rev, const ScanSpec *ss,
       single_row = true;
 
     if (!spec->row_intervals.empty()) {
-
       // start row
-      start_row = spec->row_intervals[0].start;
-      start_inclusive = spec->row_intervals[0].start_inclusive;
+      start_row = spec->row_intervals.front().start;
+      start_inclusive = spec->row_intervals.front().start_inclusive;
 
-      // end row
-      if (spec->row_intervals[0].end[0] == 0)
+      // end row (if scan_and_filter_rows the rows are ordered ascending, otherwise only one row interval)
+      if (spec->row_intervals.back().end[0] == 0)
         end_row = Key::END_ROW_MARKER;
       else {
-        end_row = spec->row_intervals[0].end;
-        end_inclusive = spec->row_intervals[0].end_inclusive;
+        end_row = spec->row_intervals.back().end;
+        end_inclusive = spec->row_intervals.back().end_inclusive;
 
-        if (!strcmp(spec->row_intervals[0].start, spec->row_intervals[0].end))
+        if (!strcmp(spec->row_intervals.front().start, spec->row_intervals.back().end))
           single_row = true;
+      }
+
+      if (spec->scan_and_filter_rows) {
+        foreach (const RowInterval& ri, spec->row_intervals) {
+          rowset.insert(arena.dup(ri.start)); // ri.end is set to "" in order to safe space
+        }
+        end_row = *rowset.rbegin();
+        end_inclusive = true;
+        single_row = rowset.size() == 1;
       }
     }
     else if (!spec->cell_intervals.empty()) {
@@ -334,7 +342,7 @@ ScanContext::initialize(int64_t rev, const ScanSpec *ss,
     }
   }
 
-  /** Get row and value regexps **/
+  /** Get row, value regexps and row set **/
   if (spec) {
     if (spec->row_regexp && *spec->row_regexp != 0) {
       row_regexp = new RE2(spec->row_regexp);

@@ -1,11 +1,11 @@
 /** -*- C++ -*-
- * Copyright (C) 2009  Luke Lu (llu@hypertable.org)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -77,6 +77,8 @@ void init(NameIdMapper &mapper) {
   HT_ASSERT(id == "0/0");
   mappings.push_back( Mapping("sys/METADATA", "0/0", false) );
 
+  /**
+     Changed the semantics of add_mapping() to be idempotent
   bool exists = false;
   try {
     mapper.add_mapping("sys", id, NameIdMapper::IS_NAMESPACE);
@@ -86,6 +88,7 @@ void init(NameIdMapper &mapper) {
     exists = true;
   }
   HT_ASSERT(exists);
+  **/
 
   mapper.add_mapping("acme", id, NameIdMapper::IS_NAMESPACE);
   HT_ASSERT(id == "1");

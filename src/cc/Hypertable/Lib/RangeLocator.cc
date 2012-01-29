@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -147,7 +147,6 @@ void RangeLocator::hyperspace_reconnected()
  */
 void RangeLocator::initialize() {
   DynamicBuffer valbuf(0);
-  HandleCallbackPtr null_handle_callback;
   uint64_t handle = 0;
   Timer timer(m_timeout_ms, true);
 
@@ -164,8 +163,7 @@ void RangeLocator::initialize() {
     String metadata_file = m_toplevel_dir + "/tables/" + TableIdentifier::METADATA_ID;
 
     try {
-      handle = m_hyperspace->open(metadata_file, OPEN_FLAG_READ,
-                                  null_handle_callback);
+      handle = m_hyperspace->open(metadata_file, OPEN_FLAG_READ);
       break;
     }
     catch (Exception &e) {
@@ -191,13 +189,16 @@ void RangeLocator::initialize() {
     }
   }
 
-  SchemaPtr schema = Schema::new_instance((char *)valbuf.base, valbuf.fill(),
-                                          true);
+  SchemaPtr schema = Schema::new_instance((char *)valbuf.base, valbuf.fill());
+
   if (!schema->is_valid()) {
-    HT_ERRORF("Schema Parse Error for table METADATA : %s",
-              schema->get_error_string());
+    HT_ERRORF("Schema Parse Error for table METADATA : %s (%s)",
+              schema->get_error_string(), (char *)valbuf.base);
     HT_THROW_(Error::RANGESERVER_SCHEMA_PARSE_ERROR);
   }
+
+  if (schema->need_id_assignment())
+    HT_THROW(Error::SCHEMA_PARSE_ERROR, "Schema needs ID assignment");
 
   m_metadata_table.id = TableIdentifier::METADATA_ID;
   m_metadata_table.generation = schema->get_generation();
@@ -235,7 +236,6 @@ RangeLocator::find_loop(const TableIdentifier *table, const char *row_key,
   error = find(table, row_key, rane_loc_infop, timer, hard);
 
   if (error == Error::TABLE_NOT_FOUND) {
-    ScopedLock lock(m_mutex);
     clear_error_history();
     HT_THROWF(error, "Table '%s' is (being) dropped", table->id);
   }
@@ -245,7 +245,7 @@ RangeLocator::find_loop(const TableIdentifier *table, const char *row_key,
     // check for timer expiration
     if (timer.remaining() < wait_time) {
       dump_error_history();
-      HT_THROWF(Error::REQUEST_TIMEOUT, "Locating range for row='%s'", row_key);
+      HT_THROWF(Error::REQUEST_TIMEOUT, "Locating range for table %s row='%s'", table->id, row_key);
     }
 
     // wait a bit
@@ -256,7 +256,6 @@ RangeLocator::find_loop(const TableIdentifier *table, const char *row_key,
     // try again
     if ((error = find(table, row_key, rane_loc_infop, timer, true))
         == Error::TABLE_NOT_FOUND) {
-      ScopedLock lock(m_mutex);
       clear_error_history();
       HT_THROWF(error, "Table '%s' is (being) dropped", table->id);
     }
@@ -348,7 +347,7 @@ RangeLocator::find(const TableIdentifier *table, const char *row_key,
     }
     catch (Exception &e) {
       if (e.code() == Error::RANGESERVER_RANGE_NOT_FOUND)
-        m_cache->invalidate(TableIdentifier::METADATA_ID, meta_keys.start);
+        m_root_stale = true;
       SAVE_ERR2(e.code(), e, format("Problem creating scanner for start row "
                 "'%s' on METADATA[..??]", meta_keys.start));
       return e.code();
@@ -372,7 +371,7 @@ RangeLocator::find(const TableIdentifier *table, const char *row_key,
                          rane_loc_infop, inclusive)) {
       String err_msg = format("Unable to find metadata for row '%s' row_key=%s",
                               meta_keys.start, row_key);
-      HT_ERRORF("%s", err_msg.c_str());
+      HT_INFOF("%s", err_msg.c_str());
       SAVE_ERR(Error::METADATA_NOT_FOUND, err_msg);
       return Error::METADATA_NOT_FOUND;
     }

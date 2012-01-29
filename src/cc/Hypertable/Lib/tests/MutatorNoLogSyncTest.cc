@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2009 Sanjit Jhala (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -31,6 +31,7 @@ extern "C" {
 #include <unistd.h>
 }
 
+#include "Common/StringExt.h"
 #include "Common/Init.h"
 #include "Common/Error.h"
 #include "Common/InetAddr.h"
@@ -214,7 +215,7 @@ namespace {
     };
 
   const char *schema =
-  "<Schema>"
+  "<Schema group_commit_interval=\"100\">"
   "  <AccessGroup name=\"default\">"
   "    <ColumnFamily>"
   "      <Name>Field</Name>"
@@ -260,6 +261,8 @@ int main(int argc, char **argv) {
   unlink("./Hypertable.RangeServer");
   HT_ASSERT(link("../RangeServer/Hypertable.RangeServer",
                  "./Hypertable.RangeServer") == 0);
+  unlink("./serverup");
+  HT_ASSERT(link("../../Tools/serverup/serverup", "./serverup") == 0);
 
   config_file = install_dir + config_file;
   Config::parse_file(config_file, file_desc());
@@ -269,9 +272,10 @@ int main(int argc, char **argv) {
     HT_ERROR("Unable to start servers");
     exit(1);
   }
+  sleep(2);
 
   // launch rangeservers with small split size so we have multiple ranges on multiple servers
-  start_rangeservers(rangeservers, num_rs, "--Hypertable.RangeServer.Range.SplitSize=700");
+  start_rangeservers(rangeservers, num_rs, "--Hypertable.RangeServer.Range.SplitSize=3000");
 
   ReactorFactory::initialize(2);
   try {
@@ -295,7 +299,7 @@ int main(int argc, char **argv) {
   try {
     // Load up some data so we have at least 3 ranges and do an explicit flush
     {
-      TableMutatorPtr mutator_ptr = table_ptr->create_mutator(0, TableMutator::FLAG_NO_LOG_SYNC);
+      TableMutatorPtr mutator_ptr = table_ptr->create_mutator(0, Table::MUTATOR_FLAG_NO_LOG_SYNC);
       cout << "*** Load 1" << endl;
       for (ii=0; ii<30; ++ii) {
         row_key = numbers[ii];
@@ -315,7 +319,7 @@ int main(int argc, char **argv) {
 
     // Load up a bit more and do an explicit flush
     {
-      TableMutatorPtr mutator_ptr = table_ptr->create_mutator(0, TableMutator::FLAG_NO_LOG_SYNC);
+      TableMutatorPtr mutator_ptr = table_ptr->create_mutator(0, Table::MUTATOR_FLAG_NO_LOG_SYNC);
        cout << "*** Load 2" << endl;
       for (;ii<34; ++ii) {
         row_key = numbers[ii];
@@ -335,7 +339,7 @@ int main(int argc, char **argv) {
 
     // Test flush on mutator destruction
     {
-      TableMutatorPtr mutator_ptr = table_ptr->create_mutator(0, TableMutator::FLAG_NO_LOG_SYNC);
+      TableMutatorPtr mutator_ptr = table_ptr->create_mutator(0, Table::MUTATOR_FLAG_NO_LOG_SYNC);
       cout << "*** Load 3" << endl;
       for (;ii<38; ++ii) {
         row_key = numbers[ii];
@@ -406,6 +410,16 @@ int main(int argc, char **argv) {
 
 
 namespace {
+  void check_rangeserver(uint32_t port) {
+    //make syscall to serverup and make sure RangeServer is up
+    String command;
+    command = (String)"./serverup --wait 5000 --silent --range-server localhost:" + port + (String)" rangeserver";
+    if (system(command.c_str()) !=0) {
+      HT_ERRORF("RangeServer on port %d did not come up", port);
+      exit(1);
+    }
+  }
+
   void start_rangeservers(vector<ServerLauncher *> &rangeservers, uint32_t nn,
                           String split_size_arg, uint32_t sleep_sec)
   {
@@ -437,7 +451,13 @@ namespace {
       rangeservers.push_back(rs);
     }
     sleep(sleep_sec);
+    // make sure the RangeServers started ow throw exception
+    for (uint32_t ii=0; ii<nn; ii++) {
+      check_rangeserver(base_port + ii);
+    }
+
   }
+
 
   void stop_rangeservers(vector<ServerLauncher *> &rangeservers, uint32_t sleep_sec)
   {

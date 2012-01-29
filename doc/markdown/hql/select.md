@@ -2,7 +2,7 @@ SELECT
 ------
 #### EBNF
 
-    SELECT ('*' | (column_predicate [',' column_predicate]*))
+    SELECT [CELLS] ('*' | (column_predicate [',' column_predicate]*))
       FROM table_name
       [where_clause]
       [options_spec]
@@ -40,13 +40,19 @@ SELECT
 
     options_spec:
       (REVS revision_count
+      | OFFSET row_offset
       | LIMIT row_count
-      | CELL_LIMIT max_cells_per_cf
+      | CELL_OFFSET cell_offset
+      | CELL_LIMIT max_cells
+      | CELL_LIMIT_PER_FAMILY max_cells_per_cf
+      | OFFSET row_offset
+      | CELL_OFFSET cell_offset
       | INTO FILE [file_location]filename[.gz]
       | DISPLAY_TIMESTAMPS
       | KEYS_ONLY
       | NO_ESCAPE
-      | RETURN_DELETES)*
+      | RETURN_DELETES
+      | SCAN_AND_FILTER_ROWS)*
 
     timestamp:
       'YYYY-MM-DD HH:MM:SS[.nanoseconds]'
@@ -56,9 +62,16 @@ SELECT
  
 #### Description
 <p>
+SELECT is used to retrieve cells from a table. The retrieved cells are filtered
+with predicates for row keys, timestamps or cell values.
 The parser only accepts a single timestamp predicate.  The '=^' operator is the
 "starts with" operator.  It will return all rows that have the same prefix as
-the operand.
+the operand. Use of the value_predicate without the "CELLS" modifier to the
+"SELECT" command is deprecated.
+
+If your query selects several independent ranges by specifying multiple row
+predicates  (i.e. WHERE ROW < 'a' OR ROW > 'c') then the LIMIT, CELL_LIMIT,
+OFFSET, CELL_OFFSET predicates are applied to each range independently.
 
 #### Options
 <p>
@@ -70,14 +83,44 @@ default all revisions of a cell are returned by the `SELECT` statement.  The
 cell revisions are stored in reverse-chronological order, so `REVS=1` will
 return the most recent version of the cell.
 
+#### `OFFSET row_offset`
+<p>
+Skips the first `row_offset` rows returned by the `SELECT` statement.  This
+option cannot be combined with `CELL_OFFSET` and currently applies
+independently to each row (or cell) interval supplied in the `WHERE` clause.
+
 #### `LIMIT row_count`
 <p>
 Limits the number of rows returned by the `SELECT` statement to `row_count`.
+The limit applies independently to each row (or cell) interval specified
+in the `WHERE` clause.
 
-#### `CELL_LIMIT max_cells_per_cf`
+#### `CELL_OFFSET cell_offset`
+<p>
+Skips the first cell_offset cells returned by the `SELECT` statement.
+This option cannot be combined with `OFFSET` and currently applies
+independently to each row (or cell) interval supplied in the WHERE clause.
+
+#### `CELL_LIMIT max_cells`
+<p>
+Limits the total number of cells returned by the query to `max_cells`
+(applied after `CELL_LIMIT_PER_FAMILY`).  The limit applies independently to each row
+(or cell) interval specified in the `WHERE` clause.
+
+#### `CELL_LIMIT_PER_FAMILY max_cells_per_cf`
 <p>
 Limits the number of cells returned per row per column family by the `SELECT` 
 statement to `max_cells_per_cf`.
+
+#### `OFFSET row_offset`
+<p>
+Skips the first `row_offset` rows returned by the SELECT statement.
+Not allowed in combination with CELL_OFFSET.
+
+#### `CELL_OFFSET cell_offset`
+<p>
+Skips the first `cell_offset` cells returned by the SELECT statement.
+Not allowed in combination with OFFSET.
 
 #### `INTO FILE [file://|dfs://]filename[.gz]`
 <p>
@@ -141,6 +184,10 @@ converted into two character escape sequences, described in the following table.
 <td>&nbsp;tab \t</td>
 <td><pre> '\' 't' </pre></td>
 </tr>
+<tr>
+<td>&nbsp;NUL \0</td>
+<td><pre> '\' '0' </pre></td>
+</tr>
 </table>
 <p>
 The `NO_ESCAPE` option turns off this escaping mechanism.
@@ -154,6 +201,17 @@ and applied during subsequent scans.  The `RETURN_DELETES` option will return
 the delete keys in addition to the normal cell keys and values.  This option
 can be useful when used in conjuction with the `DISPLAY_TIMESTAMPS` option to
 understand how the delete mechanism works.
+
+<p>
+#### `SCAN_AND_FILTER_ROWS`
+<p>
+The `SCAN_AND_FILTER_ROWS` option can be used to improve query performance
+for queries that select a very large number of individual rows.  The default
+algorithm for fetching a set of rows is to fetch each row individually, which
+involves a network roundtrip to a range server for each row.  Supplying the
+`SCAN_AND_FILTER_ROWS` option tells the system to scan over the data and
+filter the requested rows at the range server, which will reduce the number of
+network roundtrips required when the number of rows requested is very large.
 
 <p>
 #### Examples
@@ -180,3 +238,6 @@ understand how the delete mechanism works.
     SELECT * FROM test INTO FILE "dfs:///tmp/foo";
     SELECT col2:"bird" from RegexpTest WHERE ROW REGEXP "http://.*"; 
     SELECT col1:/^w[^a-zA-Z]*$/ from RegexpTest WHERE ROW REGEXP "m.*\s\S";
+    SELECT CELLS col1:/^w[^a-zA-Z]*$/ from RegexpTest WHERE VALUE REGEXP \"l.*e\";
+    SELECT CELLS col1:/^w[^a-zA-Z]*$/ from RegexpTest WHERE ROW REGEXP \"^\\D+\" 
+        AND VALUE REGEXP \"l.*e\";",

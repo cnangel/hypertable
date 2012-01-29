@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -27,6 +27,14 @@
 
 using namespace Hypertable;
 using namespace Serialization;
+
+void RangeState::clear() {
+  state = STEADY;
+  // timestmp shouldn't be cleared
+  soft_limit = 0;
+  transfer_log = split_point = old_boundary_row = 0;
+}
+
 
 size_t RangeState::encoded_length() const {
   return 9 + 8 + encoded_length_vstr(transfer_log) +
@@ -53,6 +61,17 @@ void RangeState::decode(const uint8_t **bufp, size_t *remainp) {
     split_point = decode_vstr(bufp, remainp);
     old_boundary_row = decode_vstr(bufp, remainp));
 
+}
+
+void RangeStateManaged::clear() {
+  RangeState::clear();
+  *this = *this;
+}
+
+
+void RangeStateManaged::decode(const uint8_t **bufp, size_t *remainp) {
+  RangeState::decode(bufp, remainp);
+  *this = *this;
 }
 
 std::ostream& Hypertable::operator<<(std::ostream &out, const RangeState &st) {

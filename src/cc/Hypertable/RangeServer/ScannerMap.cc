@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -87,6 +87,21 @@ void ScannerMap::purge_expired(uint32_t max_idle_millis) {
     }
     else
       ++iter;
+  }
+
+}
+
+
+void ScannerMap::get_counts(int32_t *totalp, CstrToInt32Map &table_scanner_count_map) {
+  ScopedLock lock(m_mutex);
+  CstrToInt32Map::iterator tsc_iter;
+
+  *totalp = m_scanner_map.size();
+
+  for (CellListScannerMap::iterator iter = m_scanner_map.begin();
+       iter != m_scanner_map.end(); ++iter) {
+    if ((tsc_iter = table_scanner_count_map.find((*iter).second.table.id)) != table_scanner_count_map.end())
+      table_scanner_count_map[(*iter).second.table.id]++;
   }
 
 }

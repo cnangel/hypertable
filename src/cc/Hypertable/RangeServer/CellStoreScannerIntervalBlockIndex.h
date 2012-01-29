@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -63,10 +63,11 @@ namespace Hypertable {
     BlockCompressionCodec *m_zcodec;
     KeyDecompressor      *m_key_decompressor;
     int32_t               m_fd;
+    bool                  m_cached;
     bool                  m_check_for_range_end;
     int                   m_file_id;
-    ScanContextPtr         m_scan_ctx;
-
+    ScanContextPtr        m_scan_ctx;
+    ScanContext::CstrRowSet& m_rowset;
   };
 
 }

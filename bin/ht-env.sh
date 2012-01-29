@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 #
-# Copyright (C) 2009  Luke Lu (llu@hypertable.org)
+# Copyright (C) 2007-2012 Hypertable, Inc.
 #
 # This file is part of Hypertable.
 #
 # Hypertable is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
-# as published by the Free Software Foundation; either version 2
+# as published by the Free Software Foundation; either version 3
 # of the License, or any later version.
 #
 # Hypertable is distributed in the hope that it will be useful,
@@ -36,7 +36,7 @@ server_pidfile() {
     dfsbroker)          echo $RUNTIME_ROOT/run/DfsBroker.*.pid | grep -v "*";;
     master)             echo $RUNTIME_ROOT/run/Hypertable.Master.pid;;
     rangeserver)        echo $RUNTIME_ROOT/run/Hypertable.RangeServer.pid;;
-    thriftbroker)       echo $RUNTIME_ROOT/run/ThriftBroker.pid;;
+    thriftbroker)       echo $RUNTIME_ROOT/run/ThriftBroker*.pid | grep -v "*";;
     testclient)         echo $RUNTIME_ROOT/run/Hypertable.TestClient*.pid | grep -v "*";;
     testdispatcher)     echo $RUNTIME_ROOT/run/Hypertable.TestDispatcher.pid;;
     *) echo "unknown";  echo "ERROR: unknown service: $1" >&2; return 1
@@ -130,6 +130,7 @@ wait_for_server() {
     return 1
   else
     show_success "$server_desc" "$become"
+    return 0
   fi
 }
 
@@ -146,12 +147,8 @@ set_start_vars() {
   pidfile=$RUNTIME_ROOT/run/$1.pid
   logfile=$RUNTIME_ROOT/log/$1.log
   startlog=/tmp/start-$1$$.log
-  if type cronolog > /dev/null 2>&1; then
-    logger="cronolog --link $logfile \
+  logger="$RUNTIME_ROOT/bin/cronolog --link $logfile \
       $RUNTIME_ROOT/log/archive/%Y-%m/%d/$1.log"
-  else
-    logger=
-  fi
 }
 
 check_startlog() {
@@ -198,9 +195,9 @@ start_server_no_check() {
 
 # Sanity check
 [ "$HYPERTABLE_HOME" ] || die "ERROR: HYPERTABLE_HOME is not set"
-versionre='/([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(\.[a-fA-F0-9]+)?|current)$'
+versionre='/([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(\.pre[0-9]*)?(\.[a-fA-F0-9]+)?|current)$'
 [[ $HYPERTABLE_HOME =~ $versionre ]] ||
-    die "ERROR: Invalid HYPERTABLE_HOME: $HYPERTABLE_HOME"
+  die "ERROR: Invalid HYPERTABLE_HOME: $HYPERTABLE_HOME doesnt match regex ${versionre}"
 
 # Make sure log and run directories exist
 [ -d $RUNTIME_ROOT/run ] || mkdir $RUNTIME_ROOT/run

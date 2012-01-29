@@ -37,13 +37,9 @@ table
 
 [`SELECT`](select.html) - Query a table
 
-[`SELECT CELLS`](select-cells.html) - Query a table and filter by value
-
 [`SHOW CREATE TABLE`](show-create-table.html) - Show the `CREATE TABLE` command
 used to create a table
 
 [`SHOW TABLES`](show-tables.html) - Display all existing table names
-
-[`SHUTDOWN`](shutdown.html) - Gracefully shutdown the Hypertable service
 
 [`USE`](use.html) - Use a namespace

@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2010 Sanjit Jhala (Hypertable, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -55,10 +55,11 @@ import org.hypertable.thrift.SerializedCellsWriter;
 public class TextTableOutputFormat implements org.apache.hadoop.mapred.OutputFormat<Text, Text> {
   private static final Log log = LogFactory.getLog(TextTableOutputFormat.class);
 
-  public static final String NAMESPACE = "hypertable.mapreduce.output.namespace";
+  public static final String NAMESPACE = "hypertable.mapreduce.namespace";
+  public static final String OUTPUT_NAMESPACE = "hypertable.mapreduce.output.namespace";
   public static final String TABLE = "hypertable.mapreduce.output.table";
-  public static final String MUTATOR_FLAGS = "hypertable.mapreduce.output.mutator-flags";
-  public static final String MUTATOR_FLUSH_INTERVAL = "hypertable.mapreduce.output.mutator-flush-interval";
+  public static final String MUTATOR_FLAGS = "hypertable.mapreduce.output.mutator_flags";
+  public static final String MUTATOR_FLUSH_INTERVAL = "hypertable.mapreduce.output.mutator_flush_interval";
   public static final int CLIENT_BUFFER_SIZE = 1024*1024*12;
 
   /**
@@ -108,8 +109,8 @@ public class TextTableOutputFormat implements org.apache.hadoop.mapred.OutputFor
         this.namespace = namespace;
         this.table = table;
         mClient = ThriftClient.create("localhost", 38080);
-        mNamespaceId = mClient.open_namespace(namespace);
-        mMutator = mClient.open_mutator(mNamespaceId, table, flags, flush_interval);
+        mNamespaceId = mClient.namespace_open(namespace);
+        mMutator = mClient.mutator_open(mNamespaceId, table, flags, flush_interval);
 
       }
       catch (Exception e) {
@@ -139,12 +140,12 @@ public class TextTableOutputFormat implements org.apache.hadoop.mapred.OutputFor
     public void close(Reporter reporter) throws IOException {
       try {
         if (!mCellsWriter.isEmpty()) {
-          mClient.set_cells_serialized(mMutator, mCellsWriter.buffer(), false);
+          mClient.mutator_set_cells_serialized(mMutator, mCellsWriter.buffer(), false);
           mCellsWriter.clear();
         }
         if (mNamespaceId != 0)
-          mClient.close_namespace(mNamespaceId);
-        mClient.close_mutator(mMutator, true);
+          mClient.namespace_close(mNamespaceId);
+        mClient.mutator_close(mMutator);
       }
       catch (Exception e) {
         log.error(e);
@@ -228,7 +229,7 @@ public class TextTableOutputFormat implements org.apache.hadoop.mapred.OutputFor
                               byte_array, qualifier_offset, qualifier_length,
                               timestamp, byte_array, value_offset, value_length,
                               SerializedCellsFlag.FLAG_INSERT)) {
-          mClient.set_cells_serialized(mMutator, mCellsWriter.buffer(), false);
+          mClient.mutator_set_cells_serialized(mMutator, mCellsWriter.buffer(), false);
           mCellsWriter.clear();
           if ((row_length+family_length+qualifier_length+value_length+32) > mCellsWriter.capacity())
             mCellsWriter = new SerializedCellsWriter(row_length+family_length+qualifier_length+value_length+32);
@@ -253,7 +254,9 @@ public class TextTableOutputFormat implements org.apache.hadoop.mapred.OutputFor
    */
   public RecordWriter<Text, Text> getRecordWriter(FileSystem ignored, JobConf job, String name, Progressable progress)
     throws IOException {
-    String namespace = job.get(TextTableOutputFormat.NAMESPACE);
+    String namespace = job.get(TextTableOutputFormat.OUTPUT_NAMESPACE);
+    if (namespace == null)
+      namespace = job.get(TextTableOutputFormat.NAMESPACE);
     String table = job.get(TextTableOutputFormat.TABLE);
     int flags = job.getInt(TextTableOutputFormat.MUTATOR_FLAGS, 0);
     int flush_interval = job.getInt(TextTableOutputFormat.MUTATOR_FLUSH_INTERVAL, 0);
@@ -275,7 +278,7 @@ public class TextTableOutputFormat implements org.apache.hadoop.mapred.OutputFor
     public void checkOutputSpecs(FileSystem ignore, JobConf conf)
       throws IOException {
     try {
-      //mClient.get_table_id();
+      //mClient.table_get_id();
     }
     catch (Exception e) {
       log.error(e);

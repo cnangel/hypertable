@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -75,7 +75,8 @@ void BlockCompressionHeader::decode(const uint8_t **bufp, size_t *remainp) {
   header_checksum = decode_i16(&ptr, &remaining);
 
   if (header_checksum_computed != header_checksum)
-    HT_THROW(Error::BLOCK_COMPRESSOR_BAD_HEADER, "Header checksum mismatch");
+    HT_THROWF(Error::BLOCK_COMPRESSOR_BAD_HEADER, "Header checksum mismatch at %p: %u (computed) != %u (stored)",
+              *bufp, (unsigned)header_checksum_computed, (unsigned)header_checksum);
 
   memcpy(m_magic, *bufp, 10);
   (*bufp) += 10;
@@ -90,8 +91,8 @@ void BlockCompressionHeader::decode(const uint8_t **bufp, size_t *remainp) {
   m_compression_type = decode_byte(bufp, remainp);
 
   if (m_compression_type >= BlockCompressionCodec::COMPRESSION_TYPE_LIMIT)
-    HT_THROWF(Error::BLOCK_COMPRESSOR_BAD_HEADER, "Bad compression type: %d",
-              (int)m_compression_type);
+    HT_THROWF(Error::BLOCK_COMPRESSOR_BAD_HEADER, "Unsupported compression type "
+              "(%d)", (int)m_compression_type);
 
   m_data_checksum = decode_i32(bufp, remainp);
   m_data_length = decode_i32(bufp, remainp);

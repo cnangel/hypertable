@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -32,91 +32,42 @@
 
 namespace Hypertable {
 
-  /**
-   * Monitoring stats. The labels M0 and ML in the variable name indicates
-   * that missing values mean 0 and last known value respectively.
-   */
-  namespace MonitoringStatsV0 {
-    static const uint8_t ML_SYS_DISK_AVAILABLE           = 0;
-    static const uint8_t ML_SYS_DISK_USED                = 1;
-    static const uint8_t M0_SYS_DISK_READ_KBPS           = 2;
-    static const uint8_t M0_SYS_DISK_WRITE_KBPS          = 3;
-    static const uint8_t M0_SYS_DISK_READ_RATE           = 4;
-    static const uint8_t M0_SYS_DISK_WRITE_RATE          = 5;
-    static const uint8_t ML_SYS_MEMORY_TOTAL             = 6;
-    static const uint8_t ML_SYS_MEMORY_USED              = 7;
-    static const uint8_t ML_VM_SIZE                      = 8;
-    static const uint8_t ML_VM_RESIDENT                  = 9;
-    static const uint8_t M0_SYS_NET_RECV_KBPS            = 10;
-    static const uint8_t M0_SYS_NET_SEND_KBPS            = 11;
-    static const uint8_t M0_SYS_LOADAVG_0                = 12;
-    static const uint8_t M0_SYS_LOADAVG_1                = 13;
-    static const uint8_t M0_SYS_LOADAVG_2                = 14;
-    static const uint8_t ML_CPU_PCT                      = 15;
-    static const uint8_t ML_SYS_NUM_CORES                = 16;
-    static const uint8_t ML_SYS_CLOCK_MHZ                = 17;
-
-    static const uint8_t M0_SCAN_CREATES                 = 18;//create_scanner reqs
-    static const uint8_t M0_SCAN_CELLS_RETURNED          = 19;//returned cells
-    static const uint8_t M0_SCAN_BYTES                   = 20;//Bytes scanned
-    static const uint8_t M0_UPDATES                      = 21;//#updates
-    static const uint8_t M0_UPDATE_CELLS                 = 22;//#cells updated
-    static const uint8_t M0_UPDATE_BYTES                 = 23;//Bytes updated
-    static const uint8_t M0_SYNCS                        = 24;//#updates with sync
-    static const uint8_t ML_DISK_USED                    = 25;
-    static const uint8_t ML_MEMORY_USED                  = 26;
-    static const uint8_t ML_MEMORY_ALLOCATED             = 27;
-    static const uint8_t ML_BLOCK_CACHE_MAX_MEMORY       = 28;
-    static const uint8_t ML_BLOCK_CACHE_AVAILABLE_MEMORY = 29;
-    static const uint8_t M0_BLOCK_CACHE_ACCESSES         = 30;
-    static const uint8_t M0_BLOCK_CACHE_HITS             = 31;
-    static const uint8_t ML_QUERY_CACHE_MAX_MEMORY       = 32;
-    static const uint8_t ML_QUERY_CACHE_AVAILABLE_MEMORY = 33;
-    static const uint8_t M0_QUERY_CACHE_ACCESSES         = 34;
-    static const uint8_t M0_QUERY_CACHE_HITS             = 35;
-    static const uint8_t ML_BLOOM_FILTER_SIZE            = 36;
-    static const uint8_t M0_BLOOM_FILTER_ACCESSES        = 37;
-    static const uint8_t M0_BLOOM_FILTER_MAYBES          = 38;
-    static const uint8_t M0_BLOOM_FILTER_FALSE_POSITIVES = 39;
-    static const uint8_t ML_BLOCK_INDEX_SIZE             = 40;
-    static const uint8_t ML_SHADOW_CACHE_SIZE            = 41;
-    static const uint8_t M0_SHADOW_CACHE_ACCESSES        = 42;
-    static const uint8_t M0_SHADOW_CACHE_HITS            = 43;
-    static const uint8_t ML_ROOT_COMMIT_LOG_SIZE         = 44;
-    static const uint8_t ML_META_COMMIT_LOG_SIZE         = 45;
-    static const uint8_t ML_USER_COMMIT_LOG_SIZE         = 46;
-  } // MonitoringStatsV0
-
   /** Generates RangeServer protocol request messages */
   class RangeServerProtocol : public Protocol {
 
   public:
-    static const uint64_t COMMAND_LOAD_RANGE        = 0;
-    static const uint64_t COMMAND_UPDATE            = 1;
-    static const uint64_t COMMAND_CREATE_SCANNER    = 2;
-    static const uint64_t COMMAND_FETCH_SCANBLOCK   = 3;
-    static const uint64_t COMMAND_COMPACT           = 4;
-    static const uint64_t COMMAND_STATUS            = 5;
-    static const uint64_t COMMAND_SHUTDOWN          = 6;
-    static const uint64_t COMMAND_DUMP              = 7;
-    static const uint64_t COMMAND_DESTROY_SCANNER   = 8;
-    static const uint64_t COMMAND_DROP_TABLE        = 9;
-    static const uint64_t COMMAND_DROP_RANGE        = 10;
-    static const uint64_t COMMAND_REPLAY_BEGIN      = 11;
-    static const uint64_t COMMAND_REPLAY_LOAD_RANGE = 12;
-    static const uint64_t COMMAND_REPLAY_UPDATE     = 13;
-    static const uint64_t COMMAND_REPLAY_COMMIT     = 14;
-    static const uint64_t COMMAND_GET_STATISTICS    = 15;
-    static const uint64_t COMMAND_UPDATE_SCHEMA     = 16;
-    static const uint64_t COMMAND_COMMIT_LOG_SYNC   = 17;
-    static const uint64_t COMMAND_CLOSE             = 18;
-    static const uint64_t COMMAND_MAX               = 19;
+    static const uint64_t COMMAND_LOAD_RANGE           = 0;
+    static const uint64_t COMMAND_UPDATE               = 1;
+    static const uint64_t COMMAND_CREATE_SCANNER       = 2;
+    static const uint64_t COMMAND_FETCH_SCANBLOCK      = 3;
+    static const uint64_t COMMAND_COMPACT              = 4;
+    static const uint64_t COMMAND_STATUS               = 5;
+    static const uint64_t COMMAND_SHUTDOWN             = 6;
+    static const uint64_t COMMAND_DUMP                 = 7;
+    static const uint64_t COMMAND_DESTROY_SCANNER      = 8;
+    static const uint64_t COMMAND_DROP_TABLE           = 9;
+    static const uint64_t COMMAND_DROP_RANGE           = 10;
+    static const uint64_t COMMAND_REPLAY_BEGIN         = 11;
+    static const uint64_t COMMAND_REPLAY_LOAD_RANGE    = 12;
+    static const uint64_t COMMAND_REPLAY_UPDATE        = 13;
+    static const uint64_t COMMAND_REPLAY_COMMIT        = 14;
+    static const uint64_t COMMAND_GET_STATISTICS       = 15;
+    static const uint64_t COMMAND_UPDATE_SCHEMA        = 16;
+    static const uint64_t COMMAND_COMMIT_LOG_SYNC      = 17;
+    static const uint64_t COMMAND_CLOSE                = 18;
+    static const uint64_t COMMAND_WAIT_FOR_MAINTENANCE = 19;
+    static const uint64_t COMMAND_ACKNOWLEDGE_LOAD     = 20;
+    static const uint64_t COMMAND_RELINQUISH_RANGE     = 21;
+    static const uint64_t COMMAND_HEAPCHECK            = 22;
+    static const uint64_t COMMAND_METADATA_SYNC        = 23;
+    static const uint64_t COMMAND_MAX                  = 24;
 
     static const char *m_command_strings[];
 
     enum RangeGroup {
       GROUP_METADATA_ROOT,
       GROUP_METADATA,
+      GROUP_SYSTEM,
       GROUP_USER
     };
 
@@ -127,17 +78,47 @@ namespace Hypertable {
       UPDATE_FLAG_IGNORE_UNKNOWN_CFS = 0x0002
     };
 
+    // Flags for 
+    enum {
+      COMPACT_FLAG_ROOT     = 0x0001,
+      COMPACT_FLAG_METADATA = 0x0002,
+      COMPACT_FLAG_SYSTEM   = 0x0004,
+      COMPACT_FLAG_USER     = 0x0008,
+      COMPACT_FLAG_ALL      = 0x000F
+    };
+
+    static String compact_flags_to_string(uint32_t flags);
+
+    /** Creates a "compact" request message
+     *
+     * @param table_id table identifier
+     * @param flags compact flags
+     * @return protocol message
+     */
+    static CommBuf *create_request_compact(const String &table_id, uint32_t flags);
+
+    /** Creates a "metadata_sync" request message
+     *
+     * @param table_id table identifier
+     * @param flags metadata_sync flags
+     * @param columns names of columns to sync
+     * @return protocol message
+     */
+    static CommBuf *create_request_metadata_sync(const String &table_id, uint32_t flags,
+                                                 std::vector<String> &columns);
+
     /** Creates a "load range" request message
      *
      * @param table table identifier
      * @param range range specification
      * @param transfer_log transfer log to replay
      * @param range_state range state
+     * @param needs_compaction if true the range needs to be compacted after load
      * @return protocol message
      */
     static CommBuf *create_request_load_range(const TableIdentifier &table,
         const RangeSpec &range, const char *transfer_log,
-        const RangeState &range_state);
+        const RangeState &range_state, bool needs_compaction);
 
     /** Creates an "update" request message.  The data argument holds a
      * sequence of key/value pairs.  Each key/value pair is encoded as two
@@ -161,14 +142,14 @@ namespace Hypertable {
      * @return protocol message
      */
     static CommBuf *create_request_update_schema(
-        const TableIdentifier &table, const char *schema);
+        const TableIdentifier &table, const String &schema);
 
     /** Creates an "commit_log_sync" message. Used to make previous range server updates
      * are syncd to the commit log
-     *
+     * @param table table identifier
      * @return protocol message
      */
-    static CommBuf *create_request_commit_log_sync();
+    static CommBuf *create_request_commit_log_sync(const TableIdentifier &table);
 
     /** Creates a "create scanner" request message.
      *
@@ -205,6 +186,12 @@ namespace Hypertable {
      * @return protocol message
      */
     static CommBuf *create_request_close();
+
+    /** Creates a "wait_for_maintenance" request message.
+     *
+     * @return protocol message
+     */
+    static CommBuf *create_request_wait_for_maintenance();
 
     /** Creates a "shutdown" request message.
      *
@@ -265,15 +252,38 @@ namespace Hypertable {
     static CommBuf *create_request_drop_range(const TableIdentifier &table,
                                               const RangeSpec &range);
 
+    /** Creates a "acknowledge load" request message.
+     *
+     * @param table table identifier
+     * @param range range specification
+     * @return protocol message
+     */
+    static CommBuf *create_request_acknowledge_load(const TableIdentifier &table,
+                                                    const RangeSpec &range);
+
     /** Creates a "get statistics" request message.
      *
-     * @param all_range_stats return all stats for all ranges if true, ow return
-     *     only data which has changed since the last snapshot
-     * @param snapshot save a snapshot of the latest stats on the RangeServer
      * @return protocol message
-     *
      */
-    static CommBuf *create_request_get_statistics(bool all_range_stats, bool snapshot);
+    static CommBuf *create_request_get_statistics();
+
+    /** Creates a "relinquish range" request message.
+     *
+     * @param table table identifier
+     * @param range range specification
+     * @return protocol message
+     */
+    static CommBuf *create_request_relinquish_range(const TableIdentifier &table,
+                                                    const RangeSpec &range);
+
+    /** Creates a "heapcheck" request message.
+     *
+     * @param outfile name of file to dump heap stats to
+     * @return protocol message
+     */
+    static CommBuf *create_request_heapcheck(const String &outfile);
+
+
 
     virtual const char *command_text(uint64_t command);
   };

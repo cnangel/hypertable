@@ -1,11 +1,11 @@
 /** -*- C++ -*-
- * Copyright (C) 2009 Gregory Farnum (gfarnum@gmail.com)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -70,8 +70,12 @@ int main (int argc, char **argv) {
   //  HT_INFOF("ceph/main attempting to create pieces %d", argc);
   try {
     init_with_policies<Policies>(argc, argv);
-    int port = get_i16("CephBroker.Port");
+    int port = get_i16("DfsBroker.Port");
     int worker_count = get_i32("CephBroker.Workers");
+
+    if (has("CephBroker.Port"))
+      port = get_i16("CephBroker.Port");
+
     Comm *comm = Comm::instance();
     ApplicationQueuePtr app_queue = new ApplicationQueue(worker_count);
     HT_INFOF("attemping to create new CephBroker with address %s", properties->get_str("CephBroker.MonAddr").c_str());

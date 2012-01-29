@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -103,17 +103,19 @@ typedef std::vector<const char *, CstrAlloc> CstrColumns;
 class ScanSpec {
 public:
   ScanSpec()
-    : row_limit(0), cell_limit(0), max_versions(0),
+    : row_limit(0), cell_limit(0), cell_limit_per_family(0), 
+      row_offset(0), cell_offset(0), max_versions(0),
       time_interval(TIMESTAMP_MIN, TIMESTAMP_MAX),
       return_deletes(false), keys_only(false),
-      row_regexp(0), value_regexp(0) { }
+      row_regexp(0), value_regexp(0), scan_and_filter_rows(false) { }
   ScanSpec(CharArena &arena)
-    : row_limit(0), cell_limit(0), max_versions(0), columns(CstrAlloc(arena)),
+    : row_limit(0), cell_limit(0), cell_limit_per_family(0), 
+      row_offset(0), cell_offset(0), max_versions(0), columns(CstrAlloc(arena)),
       row_intervals(RowIntervalAlloc(arena)),
       cell_intervals(CellIntervalAlloc(arena)),
       time_interval(TIMESTAMP_MIN, TIMESTAMP_MAX),
       return_deletes(false), keys_only(false),
-      row_regexp(0), value_regexp(0) { }
+      row_regexp(0), value_regexp(0), scan_and_filter_rows(false) { }
   ScanSpec(CharArena &arena, const ScanSpec &);
   ScanSpec(const uint8_t **bufp, size_t *remainp) { decode(bufp, remainp); }
 
@@ -124,6 +126,9 @@ public:
   void clear() {
     row_limit = 0;
     cell_limit = 0;
+    cell_limit_per_family = 0;
+    row_offset = 0;
+    cell_offset = 0;
     max_versions = 0;
     columns.clear();
     row_intervals.clear();
@@ -134,12 +139,16 @@ public:
     return_deletes = false;
     row_regexp = 0;
     value_regexp = 0;
+    scan_and_filter_rows = false;
   }
 
   /** Initialize 'other' ScanSpec with this copy sans the intervals */
   void base_copy(ScanSpec &other) const {
     other.row_limit = row_limit;
     other.cell_limit = cell_limit;
+    other.cell_limit_per_family = cell_limit_per_family;
+    other.row_offset = row_offset;
+    other.cell_offset = cell_offset;
     other.max_versions = max_versions;
     other.columns = columns;
     other.time_interval = time_interval;
@@ -149,18 +158,19 @@ public:
     other.cell_intervals.clear();
     other.row_regexp = row_regexp;
     other.value_regexp = value_regexp;
+    other.scan_and_filter_rows = scan_and_filter_rows;
   }
 
   bool cacheable() {
     if (row_intervals.size() == 1) {
       HT_ASSERT(row_intervals[0].start && row_intervals[0].end);
       if (!strcmp(row_intervals[0].start, row_intervals[0].end))
-	return true;
+        return true;
     }
     else if (cell_intervals.size() == 1) {
       HT_ASSERT(cell_intervals[0].start_row && cell_intervals[0].end_row);
       if (!strcmp(cell_intervals[0].start_row, cell_intervals[0].end_row))
-	return true;
+        return true;
     }
     return false;
   }
@@ -188,7 +198,7 @@ public:
    * @param regexp true if the qualifier string is a regexp
    *
    */
-  static void parse_column(const char *column, String &family, String &qualifier, bool *regexp);
+  static void parse_column(const char *column, String &family, String &qualifier, bool *has_qualifier, bool *regexp);
 
   void add_row(CharArena &arena, const char *str) {
     if (cell_intervals.size())
@@ -269,6 +279,9 @@ public:
 
   int32_t row_limit;
   int32_t cell_limit;
+  int32_t cell_limit_per_family;
+  int32_t row_offset;
+  int32_t cell_offset;
   uint32_t max_versions;
   CstrColumns columns;
   RowIntervals row_intervals;
@@ -278,6 +291,7 @@ public:
   bool keys_only;
   const char *row_regexp;
   const char *value_regexp;
+  bool scan_and_filter_rows;
 };
 
 /**
@@ -290,6 +304,11 @@ public:
   /** Copy construct from a ScanSpec */
   ScanSpecBuilder(const ScanSpec &ss) : m_scan_spec(m_arena, ss) {}
 
+  ScanSpecBuilder &operator=(const ScanSpec &ss) {
+    m_scan_spec = ScanSpec(m_arena, ss);
+    return *this;
+  }
+
   /**
    * Sets the maximum number of rows to return in the scan.
    *
@@ -298,11 +317,42 @@ public:
   void set_row_limit(int32_t n) { m_scan_spec.row_limit = n; }
 
   /**
-   * Sets the maximum number of cells to return per column family, per row
+   * Sets the maximum number of cells to return
    *
    * @param n cell limit
    */
   void set_cell_limit(int32_t n) { m_scan_spec.cell_limit = n; }
+
+  /**
+   * Sets the maximum number of cells to return per column family
+   *
+   * @param n cell limit per column family
+   */
+  void set_cell_limit_per_family(int32_t n) { m_scan_spec.cell_limit_per_family = n; }
+
+  /**
+   * Sets the number of rows to be skipped at the beginning of the query
+   *
+   * @param n row offset
+   */
+  void set_row_offset(int32_t n) { 
+    if (n && m_scan_spec.cell_offset)
+      HT_THROW(Error::BAD_SCAN_SPEC, "predicate row_offset not allowed in "
+           "combination with cell_offset");
+    m_scan_spec.row_offset = n; 
+  }
+
+  /**
+   * Sets the number of cells to be skipped at the beginning of the query
+   *
+   * @param n cell offset
+   */
+  void set_cell_offset(int32_t n) { 
+    if (n && m_scan_spec.row_offset)
+      HT_THROW(Error::BAD_SCAN_SPEC, "predicate cell_offset not allowed in "
+           "combination with row_offset");
+    m_scan_spec.cell_offset = n; 
+  }
 
   /**
    * Sets the maximum number of revisions of each cell to return in the scan.
@@ -423,6 +473,13 @@ public:
    */
   void set_return_deletes(bool val) {
     m_scan_spec.return_deletes = val;
+  }
+
+  /**
+   * Scan and filter rows.
+   */
+  void set_scan_and_filter_rows(bool val) {
+    m_scan_spec.scan_and_filter_rows = val;
   }
 
   /**

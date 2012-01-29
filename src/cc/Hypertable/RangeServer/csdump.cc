@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -142,8 +142,7 @@ int main(int argc, char **argv) {
 
     Global::dfs = dfs;
 
-    Global::block_cache = new FileBlockCache(200000000LL, 200000000LL);
-    Global::memory_tracker = new MemoryTracker(Global::block_cache);
+    Global::memory_tracker = new MemoryTracker(0, 0);
 
     /**
      * Open cellStore
@@ -229,6 +228,15 @@ int main(int argc, char **argv) {
     cout << endl;
     cout << "BLOOM FILTER SIZE: "
          << cellstore->bloom_filter_size() << endl;
+
+    /**
+     * Dump replaced files
+     */
+    cout << endl;
+    const vector<String> &replaced_files = cellstore->get_replaced_files();
+    cout << "REPLACED FILES: " << endl;
+    for(size_t ii=0; ii < replaced_files.size(); ++ii)
+         cout << replaced_files[ii] << endl;
 
     /**
      * Dump trailer

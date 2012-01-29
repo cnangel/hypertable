@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2010 Doug Judd (Hypertable, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -68,7 +68,10 @@ namespace Hypertable {
     uint8_t   bloom_filter_hash_count;
     uint16_t  version;
 
-    enum Flags { INDEX_64BIT=0x00000001, MAJOR_COMPACTION=0x00000002 };
+    enum Flags { INDEX_64BIT = 1,
+                 MAJOR_COMPACTION = 2,
+                 SPLIT = 4
+    };
 
     boost::any get(const String& prop) {
       if     (prop == "version")                return version;

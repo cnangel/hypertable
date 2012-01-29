@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2010 Doug Judd (Hypertable, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -42,7 +42,6 @@ TableDumper::TableDumper(NamespacePtr &ns, const String &name,
 			 ScanSpec &scan_spec, size_t target_node_count)
   : m_scan_spec(scan_spec), m_eod(false), m_rows_seen(0), m_bytes_scanned(0) {
   TableScannerPtr scanner;
-  ScanSpec tmp_scan_spec;
   RowInterval ri;
 
   ns->get_table_splits(name, m_splits);
@@ -63,19 +62,14 @@ TableDumper::TableDumper(NamespacePtr &ns, const String &name,
 
   m_table = ns->open_table(name);
 
-  tmp_scan_spec.clear();
-  tmp_scan_spec.columns = m_scan_spec.columns;
-  tmp_scan_spec.max_versions = m_scan_spec.max_versions;
-  tmp_scan_spec.time_interval = m_scan_spec.time_interval;
-
   for (m_next=0; m_next<target_node_count && m_next < m_ordering.size(); m_next++) {
-    tmp_scan_spec.row_intervals.clear();
+    m_scan_spec.row_intervals.clear();
     ri.start = m_splits[m_ordering[m_next]].start_row;
     ri.start_inclusive = false;
     ri.end = m_splits[m_ordering[m_next]].end_row;
     ri.end_inclusive = true;
-    tmp_scan_spec.row_intervals.push_back(ri);
-    scanner = m_table->create_scanner(tmp_scan_spec);
+    m_scan_spec.row_intervals.push_back(ri);
+    scanner = m_table->create_scanner(m_scan_spec);
     m_scanners.push_back( scanner );
   }
 

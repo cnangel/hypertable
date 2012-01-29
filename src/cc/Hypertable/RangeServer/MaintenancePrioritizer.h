@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -38,7 +38,7 @@ namespace Hypertable {
 
     class MemoryState {
     public:
-      MemoryState() : limit(Global::memory_limit), balance(0), needed(0) { }
+      MemoryState() : limit(0), balance(0), needed(0) { }
       void decrement_needed(int64_t amount) {
         if (amount > needed)
           needed = 0;
@@ -54,21 +54,21 @@ namespace Hypertable {
     MaintenancePrioritizer(RSStatsPtr &server_stats)
       : m_cellstore_minimum_size(0), m_server_stats(server_stats) { }
 
-    virtual void prioritize(RangeStatsVector &range_data,
-                            MemoryState &memory_state, String &trace_str) = 0;
+    virtual void prioritize(RangeStatsVector &range_data, MemoryState &memory_state,
+                            int32_t priority, String &trace_str) = 0;
 
   protected:
 
     int64_t m_cellstore_minimum_size;
     RSStatsPtr m_server_stats;
 
-    bool schedule_inprogress_splits(RangeStatsVector &range_data,
-                                    MemoryState &memory_state,
-                                    int32_t &priority, String &trace_str);
+    bool schedule_inprogress_operations(RangeStatsVector &range_data,
+                                        MemoryState &memory_state,
+                                        int32_t &priority, String &trace_str);
 
-    bool schedule_splits(RangeStatsVector &range_data,
-                         MemoryState &memory_state,
-                         int32_t &priority, String &trace_str);
+    bool schedule_splits_and_relinquishes(RangeStatsVector &range_data,
+                                          MemoryState &memory_state,
+                                          int32_t &priority, String &trace_str);
 
     bool schedule_necessary_compactions(RangeStatsVector &range_data,
                             CommitLog *log, int64_t prune_threshold,

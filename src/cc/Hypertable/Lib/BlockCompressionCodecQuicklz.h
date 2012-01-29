@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -22,7 +22,9 @@
 #ifndef HYPERTABLE_BLOCKCOMPRESSIONCODECQUICKLZ_H
 #define HYPERTABLE_BLOCKCOMPRESSIONCODECQUICKLZ_H
 
+#include "Common/Compat.h"
 #include "BlockCompressionCodec.h"
+#include "ThirdParty/quicklz/quicklz.h"
 
 namespace Hypertable {
 
@@ -39,7 +41,8 @@ namespace Hypertable {
     virtual int get_type() { return QUICKLZ; }
 
   private:
-    uint8_t *m_workmem;
+    qlz_state_compress m_compress;
+    qlz_state_decompress m_decompress;
   };
 
 }

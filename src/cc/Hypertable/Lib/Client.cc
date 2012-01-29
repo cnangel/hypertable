@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -43,6 +43,8 @@ extern "C" {
 #include "Hyperspace/DirEntry.h"
 #include "Hypertable/Lib/Config.h"
 
+#include "Hypertable/Master/Operation.h"
+
 #include "Client.h"
 #include "HqlCommandInterpreter.h"
 
@@ -77,14 +79,16 @@ Client::Client(const String &install_dir, uint32_t default_timeout_ms)
   initialize();
 }
 
-void Client::create_namespace(const String &name, Namespace *base, bool create_intermediate) {
+void Client::create_namespace(const String &name, Namespace *base, bool create_intermediate, bool if_not_exists) {
 
   String full_name;
   String sub_name = name;
-  int flags=NameIdMapper::IS_NAMESPACE;
+  int flags=0;
 
-  if(create_intermediate)
-    flags |= NameIdMapper::CREATE_INTERMEDIATE;
+  if (create_intermediate)
+    flags |= NamespaceFlag::CREATE_INTERMEDIATE;
+  if (if_not_exists)
+    flags |= NamespaceFlag::IF_NOT_EXISTS;
 
   if (base != NULL) {
     full_name = base->get_name() + '/';
@@ -131,9 +135,6 @@ bool Client::exists_namespace(const String &name, Namespace *base) {
 
   String namespace_file = m_toplevel_dir + "/tables/" + id;
 
-  DynamicBuffer value_buf(0);
-  Hyperspace::HandleCallbackPtr null_handle_callback;
-
   try {
     return m_hyperspace->exists(namespace_file);
   }
@@ -163,8 +164,12 @@ Hyperspace::SessionPtr& Client::get_hyperspace_session()
   return m_hyperspace;
 }
 
+MasterClientPtr Client::get_master_client() {
+  return m_master_client;
+}
+
 void Client::close() {
-  m_master_client->close();
+  HT_WARN("close() is no longer supported");
 }
 
 void Client::shutdown() {
@@ -197,8 +202,6 @@ void Client::initialize() {
 
   m_namemap = new NameIdMapper(m_hyperspace, m_toplevel_dir);
 
-  m_refresh_schema = m_props->get_bool("Hypertable.Client.RefreshSchema");
-
   Timer timer(m_timeout_ms, true);
 
   remaining = timer.remaining();
@@ -220,7 +223,7 @@ void Client::initialize() {
   m_master_client = new MasterClient(m_conn_manager, m_hyperspace, m_toplevel_dir,
                                      m_timeout_ms, m_app_queue);
 
-  m_master_client->initiate_connection(0);
+  m_master_client->initiate_connection();
 
   if (!m_master_client->wait_for_connection(timer))
     HT_THROW(Error::REQUEST_TIMEOUT, "Waiting for Master connection");

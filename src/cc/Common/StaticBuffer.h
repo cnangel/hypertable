@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -47,7 +47,7 @@ namespace Hypertable {
     }
 
     ~StaticBuffer() {
-      if (own)
+      if (own && base)
         delete [] base;
     }
 
@@ -107,7 +107,7 @@ namespace Hypertable {
     }
 
     void set(uint8_t *data, uint32_t len, bool take_ownership=true) {
-      if (own)
+      if (own && base)
         delete [] base;
       base = data;
       size = len;
@@ -115,7 +115,7 @@ namespace Hypertable {
     }
 
     void free() {
-      if (own)
+      if (own && base)
         delete [] base;
       base = 0;
       size = 0;

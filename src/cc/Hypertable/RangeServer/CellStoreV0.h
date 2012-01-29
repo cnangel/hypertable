@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -32,7 +32,7 @@
 #include <ext/hash_set>
 #endif
 
-#include "CellStoreBlockIndexMap.h"
+#include "CellStoreBlockIndexArray.h"
 
 #include "AsyncComm/DispatchHandlerSynchronizer.h"
 #include "Common/DynamicBuffer.h"
@@ -65,7 +65,8 @@ namespace Hypertable {
     CellStoreV0(Filesystem *filesys);
     virtual ~CellStoreV0();
 
-    virtual void create(const char *fname, size_t max_entries, PropertiesPtr &);
+    virtual void create(const char *fname, size_t max_entries, PropertiesPtr &,
+        const TableIdentifier *table_id=0);
     virtual void add(const Key &key, const ByteString value);
     virtual void finalize(TableIdentifier *table_identifier);
     virtual void open(const String &fname, const String &start_row,
@@ -128,7 +129,7 @@ namespace Hypertable {
     int32_t                m_fd;
     std::string            m_filename;
     IndexMap               m_index;
-    CellStoreBlockIndexMap<uint32_t> m_index_map32;
+    CellStoreBlockIndexArray<uint32_t> m_index_map32;
     CellStoreTrailerV0     m_trailer;
     BlockCompressionCodec *m_compressor;
     DynamicBuffer          m_buffer;

@@ -1,9 +1,9 @@
-#
-# Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ #
+# Copyright (C) 2007-2012 Hypertable, Inc.
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
-# as published by the Free Software Foundation; either version 2
+# as published by the Free Software Foundation; either version 3
 # of the License, or any later version.
 #
 # This program is distributed in the hope that it will be useful,
@@ -19,104 +19,113 @@
 
 set(Hypertable_SRCS
 ApacheLogParser.cc
+BalancePlan.cc
 BlockCompressionCodec.cc
 BlockCompressionCodecBmz.cc
 BlockCompressionCodecLzo.cc
 BlockCompressionCodecNone.cc
 BlockCompressionCodecQuicklz.cc
 BlockCompressionCodecZlib.cc
+BlockCompressionCodecSnappy.cc
 BlockCompressionHeader.cc
 BlockCompressionHeaderCommitLog.cc
 Cell.cc
-CompressorFactory.cc
 Client.cc
-Namespace.cc
-TableCache.cc
-NamespaceCache.cc
-CommitLogBlockStream.cc
 CommitLog.cc
+CommitLogBlockStream.cc
 CommitLogReader.cc
+CompressorFactory.cc
 Config.cc
 DataGenerator.cc
 EventHandlerMasterChange.cc
 FixedRandomStringGenerator.cc
-HqlInterpreter.cc
+Future.cc
 HqlCommandInterpreter.cc
 HqlHelpText.cc
+HqlInterpreter.cc
 IntervalScanner.cc
+IntervalScannerAsync.cc
 Key.cc
 KeySpec.cc
 LoadDataEscape.cc
 LoadDataSource.cc
-LoadDataSourceFileLocal.cc
-LoadDataSourceFileDfs.cc
-LoadDataSourceStdin.cc
 LoadDataSourceFactory.cc
+LoadDataSourceFileDfs.cc
+LoadDataSourceFileLocal.cc
+LoadDataSourceStdin.cc
 LocationCache.cc
 MasterClient.cc
 MasterFileHandler.cc
 MasterProtocol.cc
 MetaLog.cc
+MetaLogEntity.cc
+MetaLogEntityHeader.cc
 MetaLogReader.cc
-MetaLogVersion.cc
-MetaLogDfsBase.cc
-MetaLogReaderDfsBase.cc
+MetaLogWriter.cc
 NameIdMapper.cc
-RangeServerMetaLogEntryFactory.cc
-RangeServerMetaLog.cc
-RangeServerMetaLogReader.cc
-MetaLogEntryBase.cc
-RangeServerMetaLogEntries.cc
-MasterMetaLogEntryFactory.cc
-MasterMetaLog.cc
-MasterMetaLogReader.cc
+Namespace.cc
+NamespaceCache.cc
 RangeLocator.cc
+RangeMoveSpec.cc
 RangeServerClient.cc
 RangeServerProtocol.cc
 RangeState.cc
+Result.cc
 RootFileHandler.cc
 ScanBlock.cc
 ScanSpec.cc
+ScanCells.cc
 Schema.cc
-Stats.cc
-StatsV0.cc
+StatsRangeServer.cc
+StatsTable.cc
 Table.cc
+TableCache.cc
 TableDumper.cc
 TableMutator.cc
-TableMutatorDispatchHandler.cc
 TableMutatorSyncDispatchHandler.cc
-TableMutatorScatterBuffer.cc
-TableMutatorIntervalHandler.cc
 TableMutatorFlushHandler.cc
+TableMutatorIntervalHandler.cc
 TableMutatorShared.cc
+TableMutatorAsync.cc
+TableMutatorAsyncDispatchHandler.cc
+TableMutatorAsyncHandler.cc
+TableMutatorAsyncScatterBuffer.cc
 TableScanner.cc
+TableScannerDispatchHandler.cc
+TableScannerAsync.cc
+TableCallback.cc
+TableScannerHandler.cc
 TableSplit.cc
 TestSource.cc
 Types.cc
+old/MasterMetaLog.cc
+old/MasterMetaLogEntries.cc
+old/MasterMetaLogEntryFactory.cc
+old/MasterMetaLogReader.cc
+old/MetaLog.cc
+old/MetaLogDfsBase.cc
+old/MetaLogEntryBase.cc
+old/MetaLogReader.cc
+old/MetaLogReaderDfsBase.cc
+old/MetaLogVersion.cc
+old/RangeServerMetaLog.cc
+old/RangeServerMetaLogEntries.cc
+old/RangeServerMetaLogEntryFactory.cc
+old/RangeServerMetaLogReader.cc
 bmz/bmz.c
-lzo/minilzo.c
-quicklz/quicklz.cc
 )
 
 add_library(Hypertable ${Hypertable_SRCS})
 add_dependencies(Hypertable HyperComm Hyperspace HyperCommon)
-target_link_libraries(Hypertable ${EXPAT_LIBRARIES} ${RRD_LIBRARIES} Hyperspace HyperDfsBroker)
+target_link_libraries(Hypertable ${EXPAT_LIBRARIES} Hyperspace HyperAppHelper HyperDfsBroker ${MALLOC_LIBRARY} HyperThirdParty)
 
 # generate_test_data
 add_executable(generate_test_data generate_test_data.cc)
 target_link_libraries(generate_test_data Hypertable)
 
-# meta log test
-add_executable(metalog_api_test tests/MetaLogApiTest.cc)
-target_link_libraries(metalog_api_test HyperDfsBroker Hypertable)
-add_executable(metalog_master_test tests/MetaLogMasterTest.cc)
-target_link_libraries(metalog_master_test HyperDfsBroker Hypertable)
-add_executable(metalog_rs_test tests/MetaLogRangeServerTest.cc)
-target_link_libraries(metalog_rs_test HyperDfsBroker Hypertable)
-
-# meta log dumper
-add_executable(dump_metalog tests/DumpMetaLog.cc)
-target_link_libraries(dump_metalog HyperDfsBroker Hypertable)
+# old meta log dumper
+add_executable(dump_old_metalog tests/DumpMetaLog.cc)
+target_link_libraries(dump_old_metalog HyperDfsBroker Hypertable)
 
 # schemaTest
 add_executable(schemaTest tests/schemaTest.cc)
@@ -161,6 +170,30 @@ target_link_libraries(escape_test Hypertable)
 add_executable(large_insert_test tests/large_insert_test.cc)
 target_link_libraries(large_insert_test Hypertable)
 
+# async_api_test 
+add_executable(async_api_test tests/async_api_test.cc)
+target_link_libraries(async_api_test Hypertable)
+
+# scanner_abrupt_end_test
+add_executable(scanner_abrupt_end_test tests/scanner_abrupt_end_test.cc)
+target_link_libraries(scanner_abrupt_end_test Hypertable)
+
+# future_abrupt_end_test
+add_executable(future_abrupt_end_test tests/future_abrupt_end_test.cc)
+target_link_libraries(future_abrupt_end_test Hypertable)
+
+# future_mutator_cancel_test
+add_executable(future_mutator_cancel_test tests/future_mutator_cancel_test.cc)
+target_link_libraries(future_mutator_cancel_test Hypertable)
+
+# future_test 
+add_executable(future_test tests/future_test.cc)
+target_link_libraries(future_test Hypertable)
+
+# scan_spec_test
+add_executable(scan_spec_test tests/scan_spec_test.cc)
+target_link_libraries(scan_spec_test Hypertable)
+
 # row_delete_test
 add_executable(row_delete_test tests/row_delete_test.cc)
 target_link_libraries(row_delete_test Hypertable)
@@ -176,6 +209,14 @@ target_link_libraries(periodic_flush_test Hypertable)
 # name_id_mapper_test 
 add_executable(name_id_mapper_test tests/name_id_mapper_test.cc)
 target_link_libraries(name_id_mapper_test Hypertable Hyperspace)
+
+# rangeserver_serialize_test 
+add_executable(rangeserver_serialize_test tests/rangeserver_serialize_test.cc)
+target_link_libraries(rangeserver_serialize_test Hypertable Hyperspace)
+
+# MetaLog test
+add_executable(metalog_test tests/metalog_test.cc)
+target_link_libraries(metalog_test HyperDfsBroker Hypertable)
 
 
 #
@@ -200,6 +241,8 @@ configure_file(${HYPERTABLE_SOURCE_DIR}/tests/data/random.dat
 configure_file(${SRC_DIR}/schemaTest.golden ${DST_DIR}/schemaTest.golden)
 configure_file(${SRC_DIR}/locationCacheTest.golden
                ${DST_DIR}/locationCacheTest.golden)
+configure_file(${SRC_DIR}/asyncApiTest.golden
+               ${DST_DIR}/asyncApiTest.golden)
 configure_file(${SRC_DIR}/loadDataSourceTest.golden
                ${DST_DIR}/loadDataSourceTest.golden)
 configure_file(${SRC_DIR}/loadDataSourceTest.dat
@@ -212,17 +255,16 @@ configure_file(${SRC_DIR}/loadDataSourceTest-qualified-header.golden
                ${DST_DIR}/loadDataSourceTest-qualified-header.golden)
 configure_file(${SRC_DIR}/loadDataSourceTest-qualified-header.dat
                ${DST_DIR}/loadDataSourceTest-qualified-header.dat)
-configure_file(${SRC_DIR}/rsmltest.golden ${DST_DIR}/rsmltest.golden
-               COPYONLY)
-configure_file(${SRC_DIR}/rsmltest2.golden ${DST_DIR}/rsmltest2.golden
-               COPYONLY)
-configure_file(${SRC_DIR}/rsmltest3.golden ${DST_DIR}/rsmltest3.golden
-               COPYONLY)
 configure_file(${HYPERTABLE_SOURCE_DIR}/conf/hypertable.cfg
                ${DST_DIR}/hypertable.cfg)
+configure_file(${SRC_DIR}/future_test.cfg ${DST_DIR}/future_test.cfg)
 configure_file (${SRC_DIR}/MutatorNoLogSyncTest.cfg ${DST_DIR}/MutatorNoLogSyncTest.cfg)
 configure_file(${SRC_DIR}/name_id_mapper_test.cfg ${DST_DIR}/name_id_mapper_test.cfg)
+configure_file(${SRC_DIR}/metalog_test.golden ${DST_DIR}/metalog_test.golden)
+configure_file(${SRC_DIR}/metalog_test2.golden ${DST_DIR}/metalog_test2.golden)
 
+add_test(Hypertable-Lib-TestSetup env INSTALL_DIR=${INSTALL_DIR}
+         ${SRC_DIR}/test_setup.sh)
 add_test(Schema schemaTest)
 add_test(LocationCache locationCacheTest)
 add_test(LoadDataSource loadDataSourceTest)
@@ -232,13 +274,17 @@ add_test(BlockCompressor-LZO compressor_test lzo)
 add_test(BlockCompressor-NONE compressor_test none)
 add_test(BlockCompressor-QUICKLZ compressor_test quicklz)
 add_test(BlockCompressor-ZLIB compressor_test zlib)
+add_test(BlockCompressor-SNAPPY compressor_test snappy)
 add_test(CommitLog commit_log_test)
-#add_test(MetaLog-Master metalog_master_test)
-add_test(MetaLog-RangeServer metalog_rs_test)
+add_test(MetaLog metalog_test)
 add_test(Client-large-block large_insert_test)
+add_test(Client-async-api async_api_test)
+add_test(Client-future future_test)
 add_test(Client-row-delete row_delete_test)
 add_test(Client-periodic-flush periodic_flush_test)
 add_test(NameIdMapper name_id_mapper_test --config=${DST_DIR}/name_id_mapper_test.cfg)
+add_test(StatsRangeServer-serialize rangeserver_serialize_test)
+add_test(ScenSpec-basic-tests scan_spec_test)
 
 if (NOT HT_COMPONENT_INSTALL)
   file(GLOB HEADERS *.h)
@@ -247,7 +293,7 @@ if (NOT HT_COMPONENT_INSTALL)
 
   install(TARGETS generate_test_data RUNTIME DESTINATION bin)
 
-  install(TARGETS Hypertable dump_metalog
+  install(TARGETS Hypertable dump_old_metalog
           RUNTIME DESTINATION bin
           LIBRARY DESTINATION lib
           ARCHIVE DESTINATION lib)

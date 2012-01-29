@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -45,7 +45,7 @@ CellCacheScanner::CellCacheScanner(CellCachePtr &cellcache,
   Key current;
   String tmp_str;
 
-  m_keys_only = (scan_ctx->spec) ? scan_ctx->spec->keys_only : false;
+  m_keys_only = (scan_ctx->spec) ? (scan_ctx->spec->keys_only && !scan_ctx->spec->value_regexp) : false;
 
   current_buf.grow(scan_ctx->start_key.row_len +
                    scan_ctx->start_key.column_qualifier_len +

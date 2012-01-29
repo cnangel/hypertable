@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -34,20 +34,22 @@
 
 #include "Table.h"
 #include "TableScanner.h"
+#include "TableMutator.h"
 #include "TableMutatorShared.h"
+#include "TableMutatorAsync.h"
 
 using namespace Hypertable;
 using namespace Hyperspace;
 
 
 Table::Table(PropertiesPtr &props, ConnectionManagerPtr &conn_manager,
-             Hyperspace::SessionPtr &hyperspace, NameIdMapperPtr &namemap, const String &name)
+             Hyperspace::SessionPtr &hyperspace, NameIdMapperPtr &namemap,
+             const String &name, int32_t flags)
   : m_props(props), m_comm(conn_manager->get_comm()),
     m_conn_manager(conn_manager), m_hyperspace(hyperspace), m_namemap(namemap), m_name(name),
-    m_stale(true) {
+    m_flags(flags), m_stale(true) {
 
   m_timeout_ms = props->get_i32("Hypertable.Request.Timeout");
-
   initialize();
 
   m_range_locator = new RangeLocator(props, m_conn_manager, m_hyperspace,
@@ -58,14 +60,13 @@ Table::Table(PropertiesPtr &props, ConnectionManagerPtr &conn_manager,
 
 
 Table::Table(PropertiesPtr &props, RangeLocatorPtr &range_locator,
-    ConnectionManagerPtr &conn_manager, Hyperspace::SessionPtr &hyperspace,
-    ApplicationQueuePtr &app_queue, NameIdMapperPtr &namemap, const String &name,
-    uint32_t timeout_ms)
+             ConnectionManagerPtr &conn_manager, Hyperspace::SessionPtr &hyperspace,
+             ApplicationQueuePtr &app_queue, NameIdMapperPtr &namemap, const String &name,
+             int32_t flags, uint32_t timeout_ms)
   : m_props(props), m_comm(conn_manager->get_comm()),
     m_conn_manager(conn_manager), m_hyperspace(hyperspace),
     m_range_locator(range_locator), m_app_queue(app_queue), m_namemap(namemap),
-    m_name(name), m_timeout_ms(timeout_ms), m_stale(true) {
-
+    m_name(name), m_flags(flags), m_timeout_ms(timeout_ms), m_stale(true) {
   initialize();
 }
 
@@ -73,8 +74,6 @@ Table::Table(PropertiesPtr &props, RangeLocatorPtr &range_locator,
 void Table::initialize() {
   String tablefile;
   DynamicBuffer value_buf(0);
-  uint64_t handle;
-  HandleCallbackPtr null_handle_callback;
   String errmsg;
   String table_id;
 
@@ -82,34 +81,28 @@ void Table::initialize() {
   boost::trim_if(m_toplevel_dir, boost::is_any_of("/"));
   m_toplevel_dir = String("/") + m_toplevel_dir;
 
+  m_scanner_queue_size = m_props->get_i32("Hypertable.Scanner.QueueSize");
+  HT_ASSERT(m_scanner_queue_size > 0);
+
+
   // Convert table name to ID string
-  if (m_table.id == 0) {
-    bool is_namespace;
 
-    if (!m_namemap->name_to_id(m_name, table_id, &is_namespace) ||
-        is_namespace)
-      HT_THROW(Error::TABLE_NOT_FOUND, m_name);
-    m_table.set_id(table_id);
-  }
-  else {
-    bool is_namespace;
-    String new_name;
+  bool is_namespace;
 
-    if (!m_namemap->id_to_name(m_table.id, new_name, &is_namespace) ||
-        is_namespace)
-      HT_THROWF(Error::TABLE_NOT_FOUND, "%s (%s)", table_id.c_str(), m_name.c_str());
-    m_name = new_name;
-  }
+  if (!m_namemap->name_to_id(m_name, table_id, &is_namespace) ||
+      is_namespace)
+    HT_THROW(Error::TABLE_NOT_FOUND, m_name);
+  m_table.set_id(table_id);
 
   tablefile = m_toplevel_dir + "/tables/" + m_table.id;
 
-  // TODO: issue 11
   /**
-   * Open table file
+   * Get schema attribute
    */
+  value_buf.clear();
+  // TODO: issue 11
   try {
-    handle = m_hyperspace->open(tablefile, OPEN_FLAG_READ,
-                                null_handle_callback);
+    m_hyperspace->attr_get(tablefile, "schema", value_buf);
   }
   catch (Exception &e) {
     if (e.code() == Error::HYPERSPACE_BAD_PATHNAME)
@@ -118,21 +111,15 @@ void Table::initialize() {
                tablefile.c_str());
   }
 
-  /**
-   * Get schema attribute
-   */
-  value_buf.clear();
-  m_hyperspace->attr_get(handle, "schema", value_buf);
-
-  m_hyperspace->close(handle);
-
   m_schema = Schema::new_instance((const char *)value_buf.base,
-      strlen((const char *)value_buf.base), true);
+                                  strlen((const char *)value_buf.base));
 
   if (!m_schema->is_valid()) {
     HT_ERRORF("Schema Parse Error: %s", m_schema->get_error_string());
-    HT_THROW_(Error::BAD_SCHEMA);
+    HT_THROW_(Error::SCHEMA_PARSE_ERROR);
   }
+  if (m_schema->need_id_assignment())
+    HT_THROW(Error::SCHEMA_PARSE_ERROR, "Schema needs ID assignment");
 
   m_table.generation = m_schema->get_generation();
   m_stale = false;
@@ -169,7 +156,7 @@ Table::~Table() {
 }
 
 
-TableMutator *
+TableMutator*
 Table::create_mutator(uint32_t timeout_ms, uint32_t flags,
                       uint32_t flush_interval_ms) {
   uint32_t timeout = timeout_ms ? timeout_ms : m_timeout_ms;
@@ -181,11 +168,24 @@ Table::create_mutator(uint32_t timeout_ms, uint32_t flags,
   return new TableMutator(m_props, m_comm, this, m_range_locator, timeout, flags);
 }
 
+TableMutatorAsync *
+Table::create_mutator_async(ResultCallback *cb, uint32_t timeout_ms, uint32_t flags) {
+  uint32_t timeout = timeout_ms ? timeout_ms : m_timeout_ms;
+
+  return new TableMutatorAsync(m_props, m_comm, m_app_queue, this, m_range_locator, timeout,
+      cb, flags);
+}
 
 TableScanner *
 Table::create_scanner(const ScanSpec &scan_spec, uint32_t timeout_ms,
-                      bool retry_table_not_found) {
+                      int32_t flags) {
   return new TableScanner(m_comm, this, m_range_locator, scan_spec,
-                          timeout_ms ? timeout_ms : m_timeout_ms,
-                          retry_table_not_found);
+                          timeout_ms ? timeout_ms : m_timeout_ms);
+}
+
+TableScannerAsync *
+Table::create_scanner_async(ResultCallback *cb, const ScanSpec &scan_spec, uint32_t timeout_ms,
+                            int32_t flags) {
+  return new TableScannerAsync(m_comm, m_app_queue, this, m_range_locator, scan_spec,
+                                timeout_ms ? timeout_ms : m_timeout_ms, cb);
 }

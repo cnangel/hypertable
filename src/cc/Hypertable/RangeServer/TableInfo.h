@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -22,7 +22,7 @@
 #ifndef HYPERTABLE_TABLEINFO_H
 #define HYPERTABLE_TABLEINFO_H
 
-#include <map>
+#include <set>
 #include <string>
 
 #include <boost/thread/mutex.hpp>
@@ -39,6 +39,37 @@
 namespace Hypertable {
 
   class Schema;
+
+  class RangeInfo {
+  public:
+    RangeInfo(const String &start_row_, const String &end_row_)
+       : start_row(start_row_), end_row(end_row_) { }
+    RangeInfo(const char *start_row_, const char *end_row_)
+       : start_row(start_row_), end_row(end_row_) { }
+    /**
+     * This is less if its end_row is less than other
+     * or its start_row is greater than other, ie sub-range is lesser.
+     */
+    bool operator < (const RangeInfo &other) const {
+      int cmp = end_row.compare(other.end_row);
+      if (cmp < 0)
+        return true;
+      else if (cmp > 0)
+        return false;
+      return (start_row < other.start_row);
+    }
+    const String &get_start_row() const { return start_row; }
+    const String &get_end_row() const { return end_row; }
+    RangePtr get_range() const { return range; }
+    void set_start_row(const String &start_row_) { start_row=start_row_; }
+    void set_end_row(const String &end_row_) { end_row=end_row_; }
+    void set_range(RangePtr &range_) { range = range_; }
+
+  private:
+    String start_row;
+    String end_row;
+    RangePtr range;
+  };
 
   class TableInfo : public RangeSet {
   public:
@@ -57,9 +88,12 @@ namespace Hypertable {
       HT_INFOF("%p: destructor", (void *)this);
     }
 
-    virtual bool remove(const String &end_row);
-    virtual bool change_end_row(const String &old_end_row,
+    virtual bool remove(const String &start_row, const String &end_row);
+    virtual bool change_end_row(const String &start_row, const String &old_end_row,
                                 const String &new_end_row);
+    virtual bool change_start_row(const String &old_start_row, const String &new_start_row,
+                                  const String &end_row);
+
 
     /**
      * Returns a pointer to the schema object
@@ -107,6 +141,27 @@ namespace Hypertable {
     bool remove_range(const RangeSpec *range_spec, RangePtr &range);
 
     /**
+     * Stages a range for being added
+     *
+     * @param range_spec range specification of range to remove
+     */
+    void stage_range(const RangeSpec *range_spec);
+
+    /**
+     * Unstages a previously staged range
+     *
+     * @param range_spec range specification of range to remove
+     */
+    void unstage_range(const RangeSpec *range_spec);
+
+    /**
+     * Adds a range that was previously staged
+     *
+     * @param range smart pointer to range object
+     */
+    void add_staged_range(RangePtr &range);
+
+    /**
      * Adds a range
      *
      * @param range smart pointer to range object
@@ -124,6 +179,26 @@ namespace Hypertable {
      */
     bool find_containing_range(const String &row, RangePtr &range,
                                String &start_row, String &end_row);
+
+    /**
+     * Finds the range that the given row belongs to
+     *
+     * @param row row key used to locate range (in)
+     * @param range reference to smart pointer to hold removed range (out)
+     * @param start_row starting row of range (out)
+     * @param end_row ending row of range (out)
+     * @return true if found, false otherwise
+     */
+    bool find_containing_range(const String &row, RangePtr &range,
+                               const char **start_rowp, const char **end_rowp) const;
+
+    /**
+     * Returns true if the given row belongs to the set of ranges
+     * included in the table's range set.
+     *
+     * @param row row to lookup
+     */
+    bool includes_row(const String &row) const;
 
     /**
      * Dumps range table information to stdout
@@ -151,13 +226,14 @@ namespace Hypertable {
 
   private:
 
-    typedef std::map<String, RangePtr> RangeMap;
+    typedef std::set<RangeInfo> RangeInfoSet;
+    typedef std::pair<RangeInfoSet::iterator, bool> RangeInfoSetInsRec;
 
     Mutex                m_mutex;
     MasterClientPtr      m_master_client;
     TableIdentifierManaged m_identifier;
     SchemaPtr            m_schema;
-    RangeMap             m_range_map;
+    RangeInfoSet         m_range_set;
   };
 
   typedef intrusive_ptr<TableInfo> TableInfoPtr;

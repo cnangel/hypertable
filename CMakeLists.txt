@@ -1,9 +1,9 @@
 #
-# Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+# Copyright (C) 2007-2012 Hypertable, Inc.
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
-# as published by the Free Software Foundation; either version 2
+# as published by the Free Software Foundation; either version 3
 # of the License, or any later version.
 #
 # This program is distributed in the hope that it will be useful,
@@ -22,8 +22,9 @@ project(HYPERTABLE)
 # Hypertable version components
 set(VERSION_MAJOR "0")
 set(VERSION_MINOR "9")
-set(VERSION_MICRO "4")
-set(VERSION_PATCH "3")
+set(VERSION_MICRO "5")
+set(VERSION_PATCH "5")
+#set(VERSION_MISC_SUFFIX  "pre6")
 
 # cmake behavior compatibility
 cmake_minimum_required(VERSION 2.6.0)
@@ -90,7 +91,6 @@ find_package(Threads REQUIRED)
 message(STATUS "Use thread library: ${CMAKE_THREAD_LIBS_INIT}")
 find_package(Boost REQUIRED)
 find_package(BerkeleyDB REQUIRED)
-find_package(RRDtool REQUIRED)
 find_package(EXPAT REQUIRED)
 find_package(Log4cpp REQUIRED)
 find_package(Readline REQUIRED)
@@ -98,9 +98,14 @@ find_package(SIGAR REQUIRED)
 find_package(ZLIB REQUIRED)
 find_package(BZip2 REQUIRED)
 find_package(RE2 REQUIRED)
+find_package(Snappy REQUIRED)
+find_package(RRDtool REQUIRED)
+find_package(Cronolog REQUIRED)
 find_package(Doxygen)
 find_package(Tcmalloc)
+find_package(Jemalloc)
 find_package(Hoard)
+find_package(Mapr)
 find_package(Kfs)
 find_package(Ceph)
 find_package(Ant REQUIRED)
@@ -114,11 +119,26 @@ find_package(PerlThrift)
 find_package(PythonThrift)
 
 # set malloc library (maybe)
-if (Hoard_FOUND AND USE_HOARD)
-  set(MALLOC_LIBRARY ${Hoard_LIBRARIES})
-elseif (NOT USE_GLIBC_MALLOC)
+if (USE_JEMALLOC)
+  if (Jemalloc_FOUND)
+    set(MALLOC_LIBRARY ${Jemalloc_LIBRARIES})
+  else ()
+    message(FATAL_ERROR "Unable to use jemalloc: library not found")
+  endif ()
+elseif (USE_HOARD)
+  if (Hoard_FOUND)
+    set(MALLOC_LIBRARY ${Hoard_LIBRARIES})
+  else ()
+    message(FATAL_ERROR "Unable to use hoard malloc: library not found")
+  endif ()
+elseif (NOT USE_GLIBC_MALLOC AND Tcmalloc_FOUND)
   if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug" OR USE_TCMALLOC)
     set(MALLOC_LIBRARY ${Tcmalloc_LIBRARIES})
+    if (USE_TCMALLOC)
+      add_definitions(-DTCMALLOC)
+    else ()
+      add_definitions(-DTCMALLOC_MINIMAL)
+    endif ()
   endif ()
 endif ()
 
@@ -155,7 +175,7 @@ include(DocHelper)
 
 # sub-project directories
 add_subdirectory(src)
-#add_subdirectory(examples)
+add_subdirectory(examples)
 add_subdirectory(contrib)
 add_subdirectory(tests/integration)
 
@@ -176,6 +196,17 @@ install(FILES ${JARS} DESTINATION lib/java)
 install(FILES ${HYPERTABLE_BINARY_DIR}/java/hypertable-${VERSION}.jar
           DESTINATION lib/java OPTIONAL)
 install(PROGRAMS bin/jrun DESTINATION bin)
+
+file(GLOB PHPFILES ${PHPTHRIFT_ROOT}/*.php)
+
+# Copy PHP Thrift files
+install(FILES ${PHPFILES} DESTINATION lib/php)
+install(DIRECTORY ${PHPTHRIFT_ROOT}/protocol ${PHPTHRIFT_ROOT}/server ${PHPTHRIFT_ROOT}/transport
+        DESTINATION lib/php USE_SOURCE_PERMISSIONS)
+
+# Copy C++ Thrift files
+install(DIRECTORY ${Thrift_INCLUDE_DIR} DESTINATION include USE_SOURCE_PERMISSIONS)
+install(DIRECTORY ${Log4cpp_INCLUDE_DIR}/log4cpp DESTINATION include USE_SOURCE_PERMISSIONS)
 
 if (NOT HT_COMPONENT_INSTALL)
   install(FILES ${HYPERTABLE_BINARY_DIR}/java/hypertable-${VERSION}-examples.jar

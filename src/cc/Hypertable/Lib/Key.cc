@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -57,40 +57,6 @@ namespace Hypertable {
 
   const char *Key::END_ROW_MARKER = (const char *)end_row_chars;
   const char *Key::END_ROOT_ROW   = (const char *)end_root_row_chars;
-
-  ByteString
-  create_key(uint8_t flag, const char *row, uint8_t column_family_code,
-      const char *column_qualifier, int64_t timestamp, int64_t revision) {
-    size_t len = 1 + strlen(row) + 4;
-    uint8_t control = 0;
-
-    if (timestamp == AUTO_ASSIGN)
-      control = Key::AUTO_TIMESTAMP;
-    else if (timestamp != TIMESTAMP_NULL) {
-      len += 8;
-      control = Key::HAVE_TIMESTAMP;
-    }
-
-    if (revision != AUTO_ASSIGN) {
-      len += 8;
-      control |= Key::HAVE_REVISION;
-    }
-
-    uint8_t *ptr = new uint8_t [len + Serialization::encoded_length_vi32(len)];
-        // !!! could probably just make this 6
-    ByteString bs(ptr);
-    Serialization::encode_vi32(&ptr, len);
-    ptr += write_key(ptr, control, flag, row, column_family_code,
-                     column_qualifier);
-
-    if (control & Key::HAVE_TIMESTAMP)
-      Key::encode_ts64(&ptr, timestamp);
-
-    if (control & Key::HAVE_REVISION)
-      Key::encode_ts64(&ptr, revision);
-
-    return bs;
-  }
 
   void
   create_key_and_append(DynamicBuffer &dst_buf, uint8_t flag, const char *row,
@@ -196,7 +162,8 @@ namespace Hypertable {
     flag = *key.ptr++;
 
     if (control & HAVE_TIMESTAMP) {
-      timestamp = decode_ts64((const uint8_t **)&key.ptr);
+      timestamp = decode_ts64((const uint8_t **)&key.ptr, 
+              control&TS_CHRONOLOGICAL ? false : true);
       if (control & REV_IS_TS) {
         revision = timestamp;
         assert(key.ptr == end_ptr);
@@ -249,10 +216,19 @@ namespace Hypertable {
         os << " qualifier='" << key.column_qualifier << "'";
       os << " ts=" << key.timestamp;
       os << " rev=" << key.revision;
-      if (key.flag == FLAG_DELETE_CELL)
-        os << " DELETE_CELL";
+
+      if (key.flag == FLAG_DELETE_ROW)
+        os << " DELETE_ROW";
       else if (key.flag == FLAG_DELETE_COLUMN_FAMILY)
         os << " DELETE_COLUMN_FAMILY";
+      else if (key.flag == FLAG_DELETE_CELL)
+        os << " DELETE_CELL";
+      else if (key.flag == FLAG_DELETE_CELL_VERSION)
+        os << " DELETE_CELL_VERSION";
+      else if (key.flag == FLAG_INSERT)
+        os << " INSERT";
+      else
+        os << key.flag << "(unrecognized flag)";
     }
     return os;
   }

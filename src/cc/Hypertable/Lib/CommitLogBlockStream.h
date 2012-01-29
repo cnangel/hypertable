@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -48,8 +48,8 @@ namespace Hypertable {
 
   public:
 
-    CommitLogBlockStream(Filesystem *fs);
-    CommitLogBlockStream(Filesystem *fs, const String &log_dir,
+    CommitLogBlockStream(FilesystemPtr &fs);
+    CommitLogBlockStream(FilesystemPtr &fs, const String &log_dir,
                          const String &fragment);
     virtual ~CommitLogBlockStream();
 
@@ -65,7 +65,7 @@ namespace Hypertable {
 
     int load_next_valid_header(BlockCompressionHeaderCommitLog *header);
 
-    Filesystem   *m_fs;
+    FilesystemPtr m_fs;
     String        m_fragment;
     String        m_fname;
     String        m_log_dir;

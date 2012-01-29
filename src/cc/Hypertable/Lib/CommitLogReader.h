@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -41,12 +41,10 @@
 
 namespace Hypertable {
 
-  typedef std::stack<CommitLogFileInfo> LogFragmentStack;
-
   class CommitLogReader : public CommitLogBase {
 
   public:
-    CommitLogReader(Filesystem *fs, const String &log_dir, bool mark_for_deletion=false);
+    CommitLogReader(FilesystemPtr &fs, const String &log_dir, bool mark_for_deletion=false);
     virtual ~CommitLogReader();
 
     bool next_raw_block(CommitLogBlockInfo *,
@@ -66,7 +64,7 @@ namespace Hypertable {
     void load_fragments(String log_dir, bool mark_for_deletion);
     void load_compressor(uint16_t ztype);
 
-    Filesystem       *m_fs;
+    FilesystemPtr     m_fs;
     uint64_t          m_fragment_queue_offset;
     DynamicBuffer     m_block_buffer;
     int64_t           m_revision;

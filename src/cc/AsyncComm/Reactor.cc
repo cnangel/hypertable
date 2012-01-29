@@ -1,11 +1,11 @@
 /**
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
+ * as published by the Free Software Foundation; either version 3
  * of the License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -174,8 +174,9 @@ void Reactor::handle_timeouts(PollTimeout &next_timeout) {
 
       while ((dh = m_request_cache.get_next_timeout(now, handler,
                                                     &next_req_timeout)) != 0) {
-        handler->deliver_event(new Event(Event::ERROR, ((IOHandlerData *)
-            handler)->get_address(), Error::REQUEST_TIMEOUT), dh);
+        Event *event = new Event(Event::ERROR, ((IOHandlerData *)handler)->get_address(), Error::REQUEST_TIMEOUT);
+        event->set_proxy(((IOHandlerData *)handler)->get_proxy());
+        handler->deliver_event(event, dh);
       }
 
       if (next_req_timeout.sec != 0) {

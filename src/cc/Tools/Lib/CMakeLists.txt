@@ -1,9 +1,9 @@
 #
-# Copyright (C) 2008 Sanjit Jhala (Zvents, Inc.)
+# Copyright (C) 2007-2012 Hypertable, Inc.
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
-# as published by the Free Software Foundation; either version 2
+# as published by the Free Software Foundation; either version 3
 # of the License, or any later version.
 #
 # This program is distributed in the hope that it will be useful,
@@ -23,7 +23,7 @@ CommandInterpreter.cc
 )
 
 add_library(HyperTools ${Hypertools_SRCS})
-target_link_libraries(HyperTools HyperComm)
+target_link_libraries(HyperTools HyperComm ${READLINE_LIBRARIES})
 
 if (NOT HT_COMPONENT_INSTALL)
   file(GLOB HEADERS *.h)

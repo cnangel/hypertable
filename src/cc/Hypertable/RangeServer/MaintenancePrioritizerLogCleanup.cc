@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2009 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -34,11 +34,11 @@ using namespace std;
 void
 MaintenancePrioritizerLogCleanup::prioritize(RangeStatsVector &range_data,
                                              MemoryState &memory_state,
-                                             String &trace_str) {
+                                             int32_t priority, String &trace_str) {
   RangeStatsVector range_data_root;
   RangeStatsVector range_data_metadata;
+  RangeStatsVector range_data_system;
   RangeStatsVector range_data_user;
-  int32_t priority = 1;
   int collector_id = RSStats::STATS_COLLECTOR_MAINTENANCE;
 
   for (size_t i=0; i<range_data.size(); i++) {
@@ -46,6 +46,8 @@ MaintenancePrioritizerLogCleanup::prioritize(RangeStatsVector &range_data,
       range_data_root.push_back(range_data[i]);
     else if (range_data[i]->is_metadata)
       range_data_metadata.push_back(range_data[i]);
+    else if (range_data[i]->is_system)
+      range_data_system.push_back(range_data[i]);
     else
       range_data_user.push_back(range_data[i]);
   }
@@ -68,18 +70,26 @@ MaintenancePrioritizerLogCleanup::prioritize(RangeStatsVector &range_data,
                       Global::log_prune_threshold_min,
                       memory_state, priority, trace_str);
 
-
   /**
-   * Assign priority for USER ranges
+   *  Compute prune threshold based on load activity
    */
   int64_t prune_threshold = (int64_t)(m_server_stats->get_update_mbps(collector_id) * (double)Global::log_prune_threshold_max);
-
   if (prune_threshold < Global::log_prune_threshold_min)
     prune_threshold = Global::log_prune_threshold_min;
   else if (prune_threshold > Global::log_prune_threshold_max)
     prune_threshold = Global::log_prune_threshold_max;
-
   trace_str += String("STATS user log prune threshold\t") + prune_threshold + "\n";
+
+  /**
+   * Assign priority other SYSTEM ranges
+   */
+  if (!range_data_system.empty())
+    assign_priorities(range_data_system, Global::system_log, prune_threshold,
+                      memory_state, priority, trace_str);
+
+  /**
+   * Assign priority for USER ranges
+   */
 
   if (!range_data_user.empty())
     assign_priorities(range_data_user, Global::user_log, prune_threshold,
@@ -94,11 +104,13 @@ MaintenancePrioritizerLogCleanup::prioritize(RangeStatsVector &range_data,
        m_server_stats->get_scan_count(collector_id) > 20)) {
     if (memory_state.balance < memory_state.limit) {
       int64_t available = memory_state.limit - memory_state.balance;
-      int64_t block_cache_available = Global::block_cache->available();
-      if (block_cache_available < available) {
-        HT_INFOF("Increasing block cache limit by %lld",
-                 (Lld)available - block_cache_available);
-        Global::block_cache->increase_limit(available - block_cache_available);
+      if (Global::block_cache) {
+        int64_t block_cache_available = Global::block_cache->available();
+        if (block_cache_available < available) {
+          HT_INFOF("Increasing block cache limit by %lld",
+                   (Lld)available - block_cache_available);
+          Global::block_cache->increase_limit(available - block_cache_available);
+        }
       }
     }
   }
@@ -107,7 +119,7 @@ MaintenancePrioritizerLogCleanup::prioritize(RangeStatsVector &range_data,
 
 
 /**
- * 1. schedule in-progress splits
+ * 1. schedule in-progress relinquish or split operations
  * 2. schedule splits
  * 3. schedule compactions for log cleanup purposes
  */
@@ -117,14 +129,14 @@ MaintenancePrioritizerLogCleanup::assign_priorities(RangeStatsVector &range_data
               int32_t &priority, String &trace_str) {
 
   /**
-   * 1. Schedule in-progress splits
+   * 1. Schedule in-progress relinquish and/or split operations
    */
-  schedule_inprogress_splits(range_data, memory_state, priority, trace_str);
+  schedule_inprogress_operations(range_data, memory_state, priority, trace_str);
 
   /**
-   * 2. Schedule splits
+   * 2. Schedule splits and relinquishes
    */
-  schedule_splits(range_data, memory_state, priority, trace_str);
+  schedule_splits_and_relinquishes(range_data, memory_state, priority, trace_str);
 
   /**
    * 3. Schedule compactions for log cleaning purposes

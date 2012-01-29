@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -43,20 +43,18 @@ namespace Hypertable {
   void TableInfo::load(Hyperspace::SessionPtr &hyperspace) {
     String table_file = m_toplevel_dir + "/tables/" + m_table.id;
     DynamicBuffer valbuf(0);
-    HandleCallbackPtr null_handle_callback;
-    uint64_t handle;
 
-    HT_ON_SCOPE_EXIT(&Hyperspace::close_handle_ptr, hyperspace, &handle);
-    handle = hyperspace->open(table_file.c_str(), OPEN_FLAG_READ,
-                                  null_handle_callback);
-
-    hyperspace->attr_get(handle, "schema", valbuf);
+    hyperspace->attr_get(table_file, "schema", valbuf);
 
     Schema *schema = Schema::new_instance((const char *)valbuf.base,
-                                          valbuf.fill(), true);
+                                          valbuf.fill());
     if (!schema->is_valid())
       HT_THROWF(Error::RANGESERVER_SCHEMA_PARSE_ERROR,
                 "Schema Parse Error: %s", schema->get_error_string());
+    if (schema->need_id_assignment())
+      HT_THROW(Error::RANGESERVER_SCHEMA_PARSE_ERROR,
+               "Schema Parse Error: need ID assignment");
+
     m_schema = schema;
 
     m_table.generation = schema->get_generation();

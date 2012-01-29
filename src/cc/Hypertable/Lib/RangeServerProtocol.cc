@@ -1,11 +1,11 @@
 /** -*- c++ -*-
- * Copyright (C) 2008 Doug Judd (Zvents, Inc.)
+ * Copyright (C) 2007-2012 Hypertable, Inc.
  *
  * This file is part of Hypertable.
  *
  * Hypertable is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; version 2 of the
+ * as published by the Free Software Foundation; version 3 of the
  * License, or any later version.
  *
  * Hypertable is distributed in the hope that it will be useful,
@@ -49,6 +49,11 @@ namespace Hypertable {
     "update schema",
     "commit log sync",
     "close",
+    "wait for maintenance",
+    "acknowledge load",
+    "relinquish range",
+    "heapcheck",
+    "metadata sync",
     (const char *)0
   };
 
@@ -58,19 +63,81 @@ namespace Hypertable {
     return m_command_strings[command];
   }
 
+  String
+  RangeServerProtocol::compact_flags_to_string(uint32_t flags) {
+    String str;
+    if ((flags & COMPACT_FLAG_ALL) == COMPACT_FLAG_ALL)
+      str += "ALL";
+    else {
+      bool first=true;
+      if ((flags & COMPACT_FLAG_ROOT) == COMPACT_FLAG_ROOT) {
+        str += "ROOT";
+        first=false;
+      }
+      if ((flags & COMPACT_FLAG_METADATA) == COMPACT_FLAG_METADATA) {
+        if (!first) {
+          str += "|";
+          first=false;
+        }
+        str += "METADATA";
+      }
+      if ((flags & COMPACT_FLAG_SYSTEM) == COMPACT_FLAG_SYSTEM) {
+        if (!first) {
+          str += "|";
+          first=false;
+        }
+        str += "SYSTEM";
+      }
+      if ((flags & COMPACT_FLAG_USER) == COMPACT_FLAG_USER) {
+        if (!first) {
+          str += "|";
+          first=false;
+        }
+        str += "USER";
+      }
+    }
+    return str;
+  }
+
+  CommBuf *
+  RangeServerProtocol::create_request_compact(const String &table_id, uint32_t flags) {
+    CommHeader header(COMMAND_COMPACT);
+    CommBuf *cbuf = new CommBuf(header, Serialization::encoded_length_vstr(table_id) + 4);
+    Serialization::encode_vstr(cbuf->get_data_ptr_address(), table_id);
+    Serialization::encode_i32(cbuf->get_data_ptr_address(), flags);
+    return cbuf;
+  }
+
+  CommBuf *
+  RangeServerProtocol::create_request_metadata_sync(const String &table_id, uint32_t flags,
+                                                    std::vector<String> &columns) {
+    CommHeader header(COMMAND_METADATA_SYNC);
+    size_t length = Serialization::encoded_length_vstr(table_id) + 8;
+    for (size_t i=0; i<columns.size(); i++)
+      length += Serialization::encoded_length_vstr(columns[i]);
+    CommBuf *cbuf = new CommBuf(header, length);
+    Serialization::encode_vstr(cbuf->get_data_ptr_address(), table_id);
+    Serialization::encode_i32(cbuf->get_data_ptr_address(), flags);
+    Serialization::encode_i32(cbuf->get_data_ptr_address(), columns.size());
+    for (size_t i=0; i<columns.size(); i++)
+      Serialization::encode_vstr(cbuf->get_data_ptr_address(), columns[i]);
+    return cbuf;
+  }
+
   CommBuf *
   RangeServerProtocol::create_request_load_range(const TableIdentifier &table,
       const RangeSpec &range, const char *transfer_log,
-      const RangeState &range_state) {
+      const RangeState &range_state, bool needs_compaction) {
     CommHeader header(COMMAND_LOAD_RANGE);
     header.flags |= CommHeader::FLAGS_BIT_URGENT;
     CommBuf *cbuf = new CommBuf(header, table.encoded_length()
         + range.encoded_length() + encoded_length_str16(transfer_log)
-        + range_state.encoded_length());
+        + range_state.encoded_length() + 1);
     table.encode(cbuf->get_data_ptr_address());
     range.encode(cbuf->get_data_ptr_address());
     encode_str16(cbuf->get_data_ptr_address(), transfer_log);
     range_state.encode(cbuf->get_data_ptr_address());
+    Serialization::encode_bool(cbuf->get_data_ptr_address(), needs_compaction);
     return cbuf;
   }
 
@@ -78,7 +145,7 @@ namespace Hypertable {
   RangeServerProtocol::create_request_update(const TableIdentifier &table,
       uint32_t count, StaticBuffer &buffer, uint32_t flags) {
     CommHeader header(COMMAND_UPDATE);
-    if (table.is_metadata()) // If METADATA table, set the urgent bit
+    if (table.is_system()) // If system table, set the urgent bit
       header.flags |= CommHeader::FLAGS_BIT_URGENT;
     CommBuf *cbuf = new CommBuf(header, 8 + table.encoded_length(), buffer);
     table.encode(cbuf->get_data_ptr_address());
@@ -89,9 +156,9 @@ namespace Hypertable {
 
   CommBuf *
   RangeServerProtocol::create_request_update_schema(
-      const TableIdentifier &table, const char *schema) {
+      const TableIdentifier &table, const String &schema) {
     CommHeader header(COMMAND_UPDATE_SCHEMA);
-    if (table.is_metadata()) // If METADATA table, set the urgent bit
+    if (table.is_system()) // If system table, set the urgent bit
       header.flags |= CommHeader::FLAGS_BIT_URGENT;
     CommBuf *cbuf = new CommBuf(header, table.encoded_length()
         + encoded_length_vstr(schema));
@@ -100,9 +167,12 @@ namespace Hypertable {
     return cbuf;
   }
 
-  CommBuf *RangeServerProtocol::create_request_commit_log_sync() {
+  CommBuf *RangeServerProtocol::create_request_commit_log_sync(const TableIdentifier &table) {
     CommHeader header(COMMAND_COMMIT_LOG_SYNC);
-    CommBuf *cbuf = new CommBuf(header);
+    if (table.is_system()) // If system table, set the urgent bit
+      header.flags |= CommHeader::FLAGS_BIT_URGENT;
+    CommBuf *cbuf = new CommBuf(header, table.encoded_length());
+    table.encode(cbuf->get_data_ptr_address());
     return cbuf;
   }
 
@@ -110,7 +180,7 @@ namespace Hypertable {
   create_request_create_scanner(const TableIdentifier &table,
       const RangeSpec &range, const ScanSpec &scan_spec) {
     CommHeader header(COMMAND_CREATE_SCANNER);
-    if (table.is_metadata()) // If METADATA table, set the urgent bit
+    if (table.is_system()) // If system table, set the urgent bit
       header.flags |= CommHeader::FLAGS_BIT_URGENT;
     CommBuf *cbuf = new CommBuf(header, table.encoded_length()
         + range.encoded_length() + scan_spec.encoded_length());
@@ -153,6 +223,13 @@ namespace Hypertable {
 
   CommBuf *RangeServerProtocol::create_request_close() {
     CommHeader header(COMMAND_CLOSE);
+    header.flags |= CommHeader::FLAGS_BIT_URGENT;
+    CommBuf *cbuf = new CommBuf(header);
+    return cbuf;
+  }
+
+  CommBuf *RangeServerProtocol::create_request_wait_for_maintenance() {
+    CommHeader header(COMMAND_WAIT_FOR_MAINTENANCE);
     header.flags |= CommHeader::FLAGS_BIT_URGENT;
     CommBuf *cbuf = new CommBuf(header);
     return cbuf;
@@ -220,13 +297,43 @@ namespace Hypertable {
     return cbuf;
   }
 
-  CommBuf *RangeServerProtocol::create_request_get_statistics(bool all, bool snapshot) {
-    CommHeader header(COMMAND_GET_STATISTICS);
+  CommBuf *
+  RangeServerProtocol::create_request_acknowledge_load(const TableIdentifier &table,
+                                                       const RangeSpec &range) {
+    CommHeader header(COMMAND_ACKNOWLEDGE_LOAD);
     header.flags |= CommHeader::FLAGS_BIT_URGENT;
-    CommBuf *cbuf = new CommBuf(header, 2);
-    cbuf->append_bool(all);
-    cbuf->append_bool(snapshot);
+    CommBuf *cbuf = new CommBuf(header, table.encoded_length()
+                                + range.encoded_length());
+    table.encode(cbuf->get_data_ptr_address());
+    range.encode(cbuf->get_data_ptr_address());
     return cbuf;
   }
+
+  CommBuf *RangeServerProtocol::create_request_get_statistics() {
+    CommHeader header(COMMAND_GET_STATISTICS);
+    header.flags |= CommHeader::FLAGS_BIT_URGENT;
+    CommBuf *cbuf = new CommBuf(header);
+    return cbuf;
+  }
+
+  CommBuf *
+  RangeServerProtocol::create_request_relinquish_range(const TableIdentifier &table,
+                                                 const RangeSpec &range) {
+    CommHeader header(COMMAND_RELINQUISH_RANGE);
+    CommBuf *cbuf = new CommBuf(header, table.encoded_length()
+                                + range.encoded_length());
+    table.encode(cbuf->get_data_ptr_address());
+    range.encode(cbuf->get_data_ptr_address());
+    return cbuf;
+  }
+
+  CommBuf *RangeServerProtocol::create_request_heapcheck(const String &outfile) {
+    CommHeader header(COMMAND_HEAPCHECK);
+    header.flags |= CommHeader::FLAGS_BIT_URGENT;
+    CommBuf *cbuf = new CommBuf(header, Serialization::encoded_length_vstr(outfile));
+    Serialization::encode_vstr(cbuf->get_data_ptr_address(), outfile.c_str());
+    return cbuf;
+  }
+
 
 } // namespace Hypertable
